@@ -1,27 +1,173 @@
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import {
     StyleSheet, ScrollView, StatusBar, View, Text,
-    TouchableOpacity,
+    TouchableOpacity, ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
-
 import AppHeader from '@/components/common/AppHeader';
-import { useScan, ScanRecord } from '@/context/ScanContext';
+import { supabase } from '@/lib/supabase';
+
+// ─── Types (plan-centric — queried FROM treatment_plans) ───────────────────────
+
+type DbStep = {
+    id: string;
+    step_order: number;
+    title: string;
+    status: 'locked' | 'upcoming' | 'ongoing' | 'completed';
+    due_date: string | null;
+};
+
+type DbPlan = {
+    id: string;
+    overall_progress: number;
+    estimated_recovery_days: number;
+    expert_tip: string | null;
+    status: 'active' | 'completed' | 'cancelled';
+    created_at: string;
+    treatment_plan_steps: DbStep[];
+    scan: {
+        id: string;
+        disease_name: string;
+        risk_level: 'low' | 'medium' | 'high';
+        confidence_score: number;
+        scanned_at: string;
+    } | null;
+    tree: {
+        id: string;
+        label_name: string;
+        latitude: number | null;
+        longitude: number | null;
+    } | null;
+};
+
+// ─── Helpers ───────────────────────────────────────────────────────────────────
+
+function riskLabel(r: string) { return r.charAt(0).toUpperCase() + r.slice(1); }
+function riskColor(r: string) { return r === 'high' ? '#ef4444' : r === 'medium' ? '#f59e0b' : '#2eb86a'; }
+function riskBg(r: string) { return r === 'high' ? '#fee2e2' : r === 'medium' ? '#fff3e0' : '#dcfce7'; }
+function formatDate(iso: string) {
+    return new Date(iso).toLocaleDateString('en-MY', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+function formatDue(iso: string | null) {
+    if (!iso) return null;
+    return new Date(iso).toLocaleDateString('en-MY', { day: 'numeric', month: 'short' });
+}
+
+// ─── Main Component ─────────────────────────────────────────────────────────────
 
 export default function MilestonePage() {
-    const { history } = useScan();
+    const [plans, setPlans] = useState<DbPlan[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
+    const [error, setError] = useState<string | null>(null);
 
-    // Only show scans that have treatment steps
-    const scans = history.filter(s => s.treatmentSteps && s.treatmentSteps.length > 0);
+    const load = useCallback(async () => {
+        setError(null);
+        try {
+            // Step 1: get current user
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) { setPlans([]); setLoading(false); setRefreshing(false); return; }
 
-    const handlePress = (scan: ScanRecord) => {
-        router.push({ pathname: '/pages/milestone_detail' as any, params: { scanId: scan.id } });
+            // Step 2: get all tree IDs for this user
+            const { data: userTrees, error: treeErr } = await supabase
+                .from('trees')
+                .select('id')
+                .eq('user_uid', user.id);
+
+            if (treeErr) throw treeErr;
+            const treeIds = (userTrees ?? []).map((t: { id: string }) => t.id);
+
+            if (treeIds.length === 0) {
+                setPlans([]); setLoading(false); setRefreshing(false); return;
+            }
+
+            // Step 3: query directly FROM treatment_plans (most reliable direction)
+            // treatment_plans.tree_id → trees.id  (direct FK, no ambiguity)
+            // treatment_plans.scan_id → scans.id  (embed scan data)
+            const { data, error: fetchErr } = await supabase
+                .from('treatment_plans')
+                .select(`
+                    id,
+                    status,
+                    overall_progress,
+                    estimated_recovery_days,
+                    expert_tip,
+                    created_at,
+                    treatment_plan_steps (
+                        id, step_order, title, status, due_date
+                    ),
+                    scan:scans (
+                        id, disease_name, risk_level, confidence_score, scanned_at
+                    ),
+                    tree:trees (
+                        id, label_name, latitude, longitude
+                    )
+                `)
+                .in('tree_id', treeIds)
+                .order('created_at', { ascending: false });
+
+            if (fetchErr) throw fetchErr;
+
+            console.log('[milestone] plans fetched:', data?.length ?? 0);
+            setPlans((data as unknown as DbPlan[]) ?? []);
+        } catch (e: any) {
+            console.error('[milestone] error:', e?.message ?? e);
+            setError(e?.message ?? 'Failed to load milestones');
+        } finally {
+            setLoading(false);
+            setRefreshing(false);
+        }
+    }, []);
+
+    useFocusEffect(useCallback(() => {
+        setLoading(true);
+        load();
+    }, [load]));
+
+    const onRefresh = () => { setRefreshing(true); load(); };
+
+    const handlePress = (plan: DbPlan) => {
+        // Pass the scan ID so milestone_detail can fetch full data
+        if (plan.scan?.id) {
+            router.push({ pathname: '/pages/milestone_detail' as any, params: { scanId: plan.scan.id } });
+        }
     };
 
-    // ── Empty ──────────────────────────────────────────────────────
-    if (scans.length === 0) {
+    // ── Loading ──────────────────────────────────────────────────────────────
+    if (loading) {
+        return (
+            <SafeAreaView style={styles.safe}>
+                <StatusBar barStyle="dark-content" backgroundColor="#f8faf9" />
+                <AppHeader title="Milestones" />
+                <View style={styles.center}>
+                    <ActivityIndicator size="large" color="#1e5b43" />
+                    <Text style={styles.emptyText}>Loading milestones...</Text>
+                </View>
+            </SafeAreaView>
+        );
+    }
+
+    // ── Error ────────────────────────────────────────────────────────────────
+    if (error) {
+        return (
+            <SafeAreaView style={styles.safe}>
+                <AppHeader title="Milestones" />
+                <View style={styles.center}>
+                    <Ionicons name="cloud-offline-outline" size={48} color="#d1d5db" />
+                    <Text style={styles.emptyTitle}>Could not load milestones</Text>
+                    <Text style={styles.emptyText}>{error}</Text>
+                    <TouchableOpacity onPress={load} style={styles.scanNowBtn}>
+                        <Text style={styles.scanNowText}>Retry</Text>
+                    </TouchableOpacity>
+                </View>
+            </SafeAreaView>
+        );
+    }
+
+    // ── Empty ────────────────────────────────────────────────────────────────
+    if (plans.length === 0) {
         return (
             <SafeAreaView style={styles.safe}>
                 <StatusBar barStyle="dark-content" backgroundColor="#f8faf9" />
@@ -45,13 +191,9 @@ export default function MilestonePage() {
         );
     }
 
-    // ── Milestone list ─────────────────────────────────────────────
-    const active = scans.filter(s =>
-        s.treatmentSteps.some(st => st.status !== 'completed')
-    );
-    const completed = scans.filter(s =>
-        s.treatmentSteps.length > 0 && s.treatmentSteps.every(st => st.status === 'completed')
-    );
+    // ── Categorise ───────────────────────────────────────────────────────────
+    const active    = plans.filter(p => p.status === 'active');
+    const completed = plans.filter(p => p.status === 'completed');
 
     return (
         <SafeAreaView style={styles.safe}>
@@ -61,11 +203,14 @@ export default function MilestonePage() {
             <ScrollView
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={styles.scroll}
+                refreshControl={
+                    <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#1e5b43" />
+                }
             >
                 {/* ── Summary row ── */}
                 <View style={styles.summaryRow}>
                     <View style={styles.summaryChip}>
-                        <Text style={styles.summaryNum}>{scans.length}</Text>
+                        <Text style={styles.summaryNum}>{plans.length}</Text>
                         <Text style={styles.summaryLabel}>Total</Text>
                     </View>
                     <View style={[styles.summaryChip, { backgroundColor: '#fff3e0' }]}>
@@ -78,19 +223,21 @@ export default function MilestonePage() {
                     </View>
                 </View>
 
-                {/* ── Active milestones ── */}
                 {active.length > 0 && (
                     <>
                         <Text style={styles.sectionTitle}>IN PROGRESS</Text>
-                        {active.map(scan => <MilestoneCard key={scan.id} scan={scan} onPress={() => handlePress(scan)} />)}
+                        {active.map(plan => (
+                            <MilestoneCard key={plan.id} plan={plan} onPress={() => handlePress(plan)} />
+                        ))}
                     </>
                 )}
 
-                {/* ── Completed milestones ── */}
                 {completed.length > 0 && (
                     <>
                         <Text style={styles.sectionTitle}>COMPLETED</Text>
-                        {completed.map(scan => <MilestoneCard key={scan.id} scan={scan} onPress={() => handlePress(scan)} />)}
+                        {completed.map(plan => (
+                            <MilestoneCard key={plan.id} plan={plan} onPress={() => handlePress(plan)} />
+                        ))}
                     </>
                 )}
 
@@ -100,35 +247,36 @@ export default function MilestonePage() {
     );
 }
 
-// ── Milestone Card ──────────────────────────────────────────────────────────────
+// ─── Milestone Card ─────────────────────────────────────────────────────────────
 
-function MilestoneCard({ scan, onPress }: { scan: ScanRecord; onPress: () => void }) {
-    const steps   = scan.treatmentSteps ?? [];
-    const total      = steps.length;
-    const done       = steps.filter(s => s.status === 'completed').length;
+function MilestoneCard({ plan, onPress }: { plan: DbPlan; onPress: () => void }) {
+    const steps = (plan.treatment_plan_steps ?? []).sort((a, b) => a.step_order - b.step_order);
+    const total = steps.length;
+    const done  = steps.filter(s => s.status === 'completed').length;
     const progressPct = total > 0 ? done / total : 0;
-    const isCompleted = total > 0 && done === total;
+    const isCompleted = plan.status === 'completed';
+    const nextStep    = steps.find(s => s.status !== 'completed');
+    const nextDue     = nextStep ? formatDue(nextStep.due_date) : null;
 
-    // Next upcoming step
-    const nextStep = steps.find(s => s.status !== 'completed');
-
-    const location = scan.scanAddress || scan.location || 'Unknown Location';
-    const diseaseName = scan.diseaseName ?? 'Unknown Disease';
-    const risk = scan.risk;
-    const scanDate = scan.scanDate;
-
-    const riskColor = risk === 'High' ? '#ef4444' : risk === 'Medium' ? '#f59e0b' : '#2eb86a';
-    const riskBg    = risk === 'High' ? '#fee2e2' : risk === 'Medium' ? '#fff3e0' : '#dcfce7';
+    const scan     = plan.scan;
+    const tree     = plan.tree;
+    const location = tree?.label_name || 'Unknown Location';
+    const scanDate = scan?.scanned_at ? formatDate(scan.scanned_at) : formatDate(plan.created_at);
+    const risk     = scan?.risk_level ?? 'low';
 
     return (
         <TouchableOpacity style={styles.card} activeOpacity={0.85} onPress={onPress}>
-            {/* Top row — disease + risk badge */}
+            {/* Top row */}
             <View style={styles.cardTop}>
                 <View style={styles.cardTopLeft}>
-                    <View style={[styles.riskBadge, { backgroundColor: riskBg }]}>
-                        <Text style={[styles.riskText, { color: riskColor }]}>{risk} RISK</Text>
+                    <View style={[styles.riskBadge, { backgroundColor: riskBg(risk) }]}>
+                        <Text style={[styles.riskText, { color: riskColor(risk) }]}>
+                            {riskLabel(risk)} RISK
+                        </Text>
                     </View>
-                    <Text style={styles.cardDisease} numberOfLines={2}>{diseaseName}</Text>
+                    <Text style={styles.cardDisease} numberOfLines={2}>
+                        {scan?.disease_name ?? 'Unknown Disease'}
+                    </Text>
                 </View>
                 <View style={styles.circleWrap}>
                     <Text style={styles.circleNum}>{done}/{total}</Text>
@@ -166,12 +314,10 @@ function MilestoneCard({ scan, onPress }: { scan: ScanRecord; onPress: () => voi
                     <>
                         <Ionicons name="arrow-forward-circle-outline" size={14} color="#1e5b43" />
                         <Text style={styles.nextText}>
-                            Next: {nextStep.title}
-                            {nextStep.date ? ` · ${nextStep.date}` : ''}
+                            Next: {nextStep.title}{nextDue ? ` · ${nextDue}` : ''}
                         </Text>
                     </>
                 ) : null}
-
                 <View style={styles.chevron}>
                     <Ionicons name="chevron-forward" size={18} color="#9ca3af" />
                 </View>
@@ -180,10 +326,10 @@ function MilestoneCard({ scan, onPress }: { scan: ScanRecord; onPress: () => voi
     );
 }
 
-// ── Styles ──────────────────────────────────────────────────────────────────────
+// ─── Styles ─────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-    safe: { flex: 1, backgroundColor: '#f8faf9' },
+    safe:  { flex: 1, backgroundColor: '#f8faf9' },
     center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 14, paddingHorizontal: 32 },
     emptyTitle: { fontSize: 18, fontWeight: '800', color: '#374151' },
     emptyText: { fontSize: 14, color: '#9ca3af', textAlign: 'center', lineHeight: 22 },
@@ -201,7 +347,7 @@ const styles = StyleSheet.create({
         flex: 1, backgroundColor: '#f3f4f6', borderRadius: 20,
         paddingVertical: 16, alignItems: 'center',
     },
-    summaryNum: { fontSize: 26, fontWeight: '800', color: '#1e5b43' },
+    summaryNum:   { fontSize: 26, fontWeight: '800', color: '#1e5b43' },
     summaryLabel: { fontSize: 11, fontWeight: '600', color: '#6b7280', marginTop: 2 },
 
     sectionTitle: {
@@ -209,10 +355,8 @@ const styles = StyleSheet.create({
         letterSpacing: 1.2, marginBottom: 14, marginTop: 4,
     },
 
-    // Card
     card: {
-        backgroundColor: '#fff', borderRadius: 28, padding: 20,
-        marginBottom: 16,
+        backgroundColor: '#fff', borderRadius: 28, padding: 20, marginBottom: 16,
         shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.05, shadowRadius: 12, elevation: 3,
     },
@@ -227,14 +371,14 @@ const styles = StyleSheet.create({
         borderTopColor: '#1e5b43', borderRightColor: '#1e5b43',
         alignItems: 'center', justifyContent: 'center',
     },
-    circleNum: { fontSize: 14, fontWeight: '800', color: '#111827' },
+    circleNum:   { fontSize: 14, fontWeight: '800', color: '#111827' },
     circleLabel: { fontSize: 9, color: '#6b7280', fontWeight: '600' },
 
     metaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 14 },
     metaText: { fontSize: 12, color: '#6b7280', flexShrink: 1 },
-    metaDot: { color: '#d1d5db' },
+    metaDot:  { color: '#d1d5db' },
 
-    progressBg: { height: 8, backgroundColor: '#f3f4f6', borderRadius: 8, marginBottom: 12, overflow: 'hidden' },
+    progressBg:   { height: 8, backgroundColor: '#f3f4f6', borderRadius: 8, marginBottom: 12, overflow: 'hidden' },
     progressFill: { height: 8, borderRadius: 8 },
 
     nextRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },

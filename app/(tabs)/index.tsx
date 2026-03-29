@@ -1,31 +1,182 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
-    View,
-    Text,
-    StyleSheet,
-    ScrollView,
-    TouchableOpacity,
-    Image,
-    Dimensions,
+    View, Text, StyleSheet, ScrollView,
+    TouchableOpacity, Image, Dimensions, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import AppHeader from '@/components/common/AppHeader';
-import { useScan } from '@/context/ScanContext';
+import { supabase } from '@/lib/supabase';
 
 const { width } = Dimensions.get('window');
 
+// ─── Types ─────────────────────────────────────────────────────────────────────
+
+type HomeData = {
+    userName: string;
+    latestScan: {
+        disease_name: string;
+        scanned_at: string;
+        risk_level: 'low' | 'medium' | 'high';
+        tree_label: string;
+    } | null;
+    totalScans: number;
+    highRiskScan: {
+        disease_name: string;
+        tree_label: string;
+    } | null;
+    currentStep: {
+        title: string;
+        due_date: string | null;
+    } | null;
+};
+
+function formatDate(iso: string) {
+    return new Date(iso).toLocaleDateString('en-MY', {
+        day: 'numeric', month: 'short', year: 'numeric',
+    });
+}
+function formatDue(iso: string | null) {
+    if (!iso) return null;
+    return new Date(iso).toLocaleDateString('en-MY', { day: 'numeric', month: 'short' });
+}
+
+// ─── Main Component ─────────────────────────────────────────────────────────────
+
 export default function Index() {
-    const { history } = useScan();
+    const [data, setData]           = useState<HomeData | null>(null);
+    const [loading, setLoading]     = useState(true);
     const [alertDismissed, setAlertDismissed] = useState(false);
 
-    const latestScan = history[0];
-    const totalRecords = history.length;
-    const highRiskScan = history.find(s => s.risk === 'High');
-    const currentStep = latestScan?.treatmentSteps.find(s => s.status === 'current');
+    const load = useCallback(async () => {
+        try {
+            // Step 1: Get current user + their profile name
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) { setData(null); setLoading(false); return; }
+
+            const { data: profile } = await supabase
+                .from('users')
+                .select('full_name')
+                .eq('id', user.id)
+                .maybeSingle();
+
+            const userName = profile?.full_name || user.email?.split('@')[0] || 'Farmer';
+
+            // Step 2: Get all tree IDs for this user
+            const { data: userTrees } = await supabase
+                .from('trees')
+                .select('id, label_name')
+                .eq('user_uid', user.id);
+
+            const treeIds = (userTrees ?? []).map((t: { id: string }) => t.id);
+
+            if (treeIds.length === 0) {
+                setData({ userName, latestScan: null, totalScans: 0, highRiskScan: null, currentStep: null });
+                setLoading(false);
+                return;
+            }
+
+            // Build a label map: id → label_name
+            const treeLabels: Record<string, string> = {};
+            (userTrees ?? []).forEach((t: { id: string; label_name: string }) => {
+                treeLabels[t.id] = t.label_name;
+            });
+
+            // Step 3: Fetch scans for those trees (latest first)
+            const { data: scans } = await supabase
+                .from('scans')
+                .select('id, disease_name, scanned_at, risk_level, tree_id')
+                .in('tree_id', treeIds)
+                .order('scanned_at', { ascending: false });
+
+            const totalScans = scans?.length ?? 0;
+            const latest = scans?.[0] ?? null;
+            const highRisk = scans?.find(s => s.risk_level === 'high') ?? null;
+
+            // Step 4: Fetch the current ongoing milestone step (from active treatment plans)
+            const { data: ongoingStep } = await supabase
+                .from('treatment_plan_steps')
+                .select(`
+                    id, title, due_date,
+                    treatment_plan:treatment_plans!inner (
+                        id, status, tree_id
+                    )
+                `)
+                .eq('status', 'ongoing')
+                .in('treatment_plans.tree_id', treeIds)
+                .limit(1)
+                .maybeSingle();
+
+            setData({
+                userName,
+                latestScan: latest ? {
+                    disease_name: latest.disease_name,
+                    scanned_at: latest.scanned_at,
+                    risk_level: latest.risk_level,
+                    tree_label: treeLabels[latest.tree_id] || 'Unknown Plot',
+                } : null,
+                totalScans,
+                highRiskScan: highRisk ? {
+                    disease_name: highRisk.disease_name,
+                    tree_label: treeLabels[highRisk.tree_id] || 'Unknown Plot',
+                } : null,
+                currentStep: ongoingStep ? {
+                    title: ongoingStep.title,
+                    due_date: ongoingStep.due_date,
+                } : null,
+            });
+        } catch (e: any) {
+            console.error('[home] fetch error:', e?.message ?? e);
+            setData(null);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    // Reload every time home tab comes into focus
+    useFocusEffect(useCallback(() => {
+        setLoading(true);
+        setAlertDismissed(false);
+        load();
+    }, [load]));
+
+    // ── Loading skeleton ───────────────────────────────────────────────────────
+    if (loading) {
+        return (
+            <SafeAreaView style={styles.container}>
+                <StatusBar style="dark" />
+                <AppHeader title="GETY" />
+                <View style={styles.loadingCenter}>
+                    <ActivityIndicator size="large" color="#1e5b43" />
+                    <Text style={styles.loadingText}>Loading dashboard...</Text>
+                </View>
+            </SafeAreaView>
+        );
+    }
+
+    const {
+        userName,
+        latestScan,
+        totalScans,
+        highRiskScan,
+        currentStep,
+    } = data ?? {
+        userName: 'Farmer',
+        latestScan: null,
+        totalScans: 0,
+        highRiskScan: null,
+        currentStep: null,
+    };
+
+    // Greeting based on time of day
+    const hour = new Date().getHours();
+    const greeting = hour < 12 ? 'Good Morning' : hour < 17 ? 'Good Afternoon' : 'Good Evening';
+    const subText = totalScans > 0
+        ? `You have ${totalScans} scan record${totalScans > 1 ? 's' : ''} in the system.`
+        : 'Start scanning to track your estate health.';
 
     return (
         <SafeAreaView style={styles.container}>
@@ -38,10 +189,10 @@ export default function Index() {
                 contentContainerStyle={styles.scrollContent}
             >
                 {/* ── Greeting ── */}
-                <Text style={styles.greeting}>Good Morning, Adli!</Text>
-                <Text style={styles.greetingSub}>Your estate is looking healthy today.</Text>
+                <Text style={styles.greeting}>{greeting}, {userName}!</Text>
+                <Text style={styles.greetingSub}>{subText}</Text>
 
-                {/* ── Alert Banner (only for high-risk scans) ── */}
+                {/* ── Alert Banner (high risk only) ── */}
                 {!alertDismissed && highRiskScan && (
                     <View style={styles.alertCard}>
                         <View style={styles.alertLeft}>
@@ -49,7 +200,7 @@ export default function Index() {
                             <View style={styles.alertText}>
                                 <Text style={styles.alertTitle}>Action Required</Text>
                                 <Text style={styles.alertBody}>
-                                    {highRiskScan.diseaseName} detected at {highRiskScan.location}. Review scan records immediately.
+                                    {highRiskScan.disease_name} detected at {highRiskScan.tree_label}. Review scan records immediately.
                                 </Text>
                             </View>
                         </View>
@@ -64,20 +215,37 @@ export default function Index() {
                     <View style={styles.diagnosisLeft}>
                         <Text style={styles.diagnosisLabel}>Recent Diagnosis</Text>
                         <Text style={styles.diagnosisName}>
-                            {latestScan ? latestScan.diseaseName : 'No scans yet'}
+                            {latestScan ? latestScan.disease_name : 'No scans yet'}
                         </Text>
                         <Text style={styles.diagnosisTime}>
-                            {latestScan ? `Scanned on ${latestScan.scanDate}` : 'Start scanning to see results'}
+                            {latestScan
+                                ? `Scanned on ${formatDate(latestScan.scanned_at)} · ${latestScan.tree_label}`
+                                : 'Start scanning to see results'}
                         </Text>
                     </View>
-                    <View style={styles.diagnosisIcon}>
-                        <MaterialCommunityIcons name="leaf" size={32} color="#a8e6cf" />
+                    <View style={[
+                        styles.diagnosisIcon,
+                        latestScan?.risk_level === 'high'
+                            ? { backgroundColor: '#ffebee' }
+                            : latestScan?.risk_level === 'medium'
+                                ? { backgroundColor: '#fff3e0' }
+                                : { backgroundColor: '#f0fdf4' },
+                    ]}>
+                        <MaterialCommunityIcons
+                            name="leaf"
+                            size={32}
+                            color={
+                                latestScan?.risk_level === 'high' ? '#ef4444'
+                                    : latestScan?.risk_level === 'medium' ? '#f59e0b'
+                                        : '#a8e6cf'
+                            }
+                        />
                     </View>
                 </View>
 
                 {/* ── Stats Row ── */}
                 <View style={styles.statsRow}>
-                    {/* Milestone */}
+                    {/* Current milestone step */}
                     <View style={styles.statCard}>
                         <View style={styles.statIconRow}>
                             <MaterialCommunityIcons name="calendar-check" size={18} color="#235e45" />
@@ -87,17 +255,19 @@ export default function Index() {
                             {currentStep ? currentStep.title : 'No active task'}
                         </Text>
                         <Text style={styles.statSub}>
-                            {currentStep?.date ? `Due ${currentStep.date}` : 'All steps up to date'}
+                            {currentStep?.due_date
+                                ? `Due ${formatDue(currentStep.due_date)}`
+                                : 'All steps up to date'}
                         </Text>
                     </View>
 
-                    {/* Records */}
+                    {/* Total records */}
                     <View style={styles.statCard}>
                         <View style={styles.statIconRow}>
                             <MaterialCommunityIcons name="chart-bar" size={18} color="#235e45" />
                             <Text style={styles.statCategory}>RECORDS</Text>
                         </View>
-                        <Text style={[styles.statMain, { fontSize: 36 }]}>{totalRecords}</Text>
+                        <Text style={[styles.statMain, { fontSize: 36 }]}>{totalScans}</Text>
                         <Text style={styles.statSub}>Total past scans</Text>
                     </View>
                 </View>
@@ -149,7 +319,7 @@ export default function Index() {
                     <TouchableOpacity
                         style={styles.actionItem}
                         activeOpacity={0.75}
-                        onPress={() => router.push('/(tabs)/reminder')}
+                        onPress={() => router.push('/(tabs)/milestone')}
                     >
                         <View style={styles.actionIconBox}>
                             <MaterialCommunityIcons name="flag-checkered" size={24} color="#374151" />
@@ -174,87 +344,83 @@ export default function Index() {
     );
 }
 
+// ─── Styles ─────────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f8faf9' },
     scroll: { flex: 1 },
     scrollContent: { paddingHorizontal: 20, paddingTop: 4 },
+    loadingCenter: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
+    loadingText: { fontSize: 14, color: '#9ca3af' },
 
-    // Greeting
-    greeting: { fontSize: 28, fontWeight: '800', color: '#111827', marginBottom: 6 },
+    greeting:    { fontSize: 28, fontWeight: '800', color: '#111827', marginBottom: 6 },
     greetingSub: { fontSize: 14, color: '#6b7280', marginBottom: 20 },
 
-    // Alert
     alertCard: {
-        backgroundColor: '#fff3f3',
-        borderRadius: 20,
-        padding: 16,
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-        justifyContent: 'space-between',
-        marginBottom: 20,
-        borderWidth: 1,
-        borderColor: '#fecaca',
+        backgroundColor: '#fff3f3', borderRadius: 20, padding: 16,
+        flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between',
+        marginBottom: 20, borderWidth: 1, borderColor: '#fecaca',
     },
-    alertLeft: { flexDirection: 'row', gap: 10, flex: 1 },
-    alertText: { flex: 1 },
+    alertLeft:  { flexDirection: 'row', gap: 10, flex: 1 },
+    alertText:  { flex: 1 },
     alertTitle: { fontSize: 13, fontWeight: '800', color: '#c62828', marginBottom: 4 },
-    alertBody: { fontSize: 13, color: '#374151', lineHeight: 20 },
+    alertBody:  { fontSize: 13, color: '#374151', lineHeight: 20 },
     alertClose: { padding: 4, marginLeft: 8 },
 
-    // Recent Diagnosis
     diagnosisCard: {
-        backgroundColor: '#fff',
-        borderRadius: 24,
-        padding: 20,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
+        backgroundColor: '#fff', borderRadius: 24, padding: 20,
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
         marginBottom: 16,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.05,
-        shadowRadius: 10,
-        elevation: 2,
+        shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.05, shadowRadius: 10, elevation: 2,
     },
-    diagnosisLeft: { flex: 1 },
-    diagnosisLabel: { fontSize: 11, color: '#9ca3af', fontWeight: '700', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 },
+    diagnosisLeft: { flex: 1, marginRight: 12 },
+    diagnosisLabel: {
+        fontSize: 11, color: '#9ca3af', fontWeight: '700',
+        marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5,
+    },
     diagnosisName: { fontSize: 20, fontWeight: '800', color: '#235e45', marginBottom: 4 },
     diagnosisTime: { fontSize: 12, color: '#9ca3af' },
     diagnosisIcon: {
-        width: 56, height: 56, borderRadius: 28, backgroundColor: '#f0fdf4',
+        width: 56, height: 56, borderRadius: 28,
         alignItems: 'center', justifyContent: 'center',
     },
 
-    // Stats
     statsRow: { flexDirection: 'row', gap: 14, marginBottom: 28 },
     statCard: {
         flex: 1, backgroundColor: '#fff', borderRadius: 24, padding: 18,
-        shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.04, shadowRadius: 10, elevation: 2,
+        shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.04, shadowRadius: 10, elevation: 2,
     },
     statIconRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 },
     statCategory: { fontSize: 9, fontWeight: '800', color: '#9ca3af', letterSpacing: 0.5, textTransform: 'uppercase' },
     statMain: { fontSize: 18, fontWeight: '800', color: '#111827', lineHeight: 24, marginBottom: 4 },
-    statSub: { fontSize: 11, color: '#9ca3af', fontWeight: '600' },
+    statSub:  { fontSize: 11, color: '#9ca3af', fontWeight: '600' },
 
-    // Quick Actions
     sectionTitle: { fontSize: 20, fontWeight: '800', color: '#111827', marginBottom: 16 },
     captureBtn: {
         backgroundColor: '#1e5b43', flexDirection: 'row', alignItems: 'center',
         justifyContent: 'center', paddingVertical: 18, borderRadius: 30,
         gap: 10, marginBottom: 16,
-        shadowColor: '#1e5b43', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.25, shadowRadius: 12, elevation: 4,
+        shadowColor: '#1e5b43', shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.25, shadowRadius: 12, elevation: 4,
     },
     captureBtnText: { color: '#fff', fontSize: 17, fontWeight: '700' },
 
     actionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginBottom: 28 },
-    actionItem: { width: (width - 54) / 2, backgroundColor: '#fff', borderRadius: 24, padding: 20, alignItems: 'center', gap: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 8, elevation: 2 },
-    actionIconBox: { width: 52, height: 52, borderRadius: 26, backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center' },
+    actionItem: {
+        width: (width - 54) / 2, backgroundColor: '#fff', borderRadius: 24,
+        padding: 20, alignItems: 'center', gap: 10,
+        shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.04, shadowRadius: 8, elevation: 2,
+    },
+    actionIconBox: {
+        width: 52, height: 52, borderRadius: 26,
+        backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center',
+    },
     actionLabel: { fontSize: 13, fontWeight: '700', color: '#374151' },
 
-    // Leaf Image
-    leafImageContainer: {
-        width: '100%', height: 180, borderRadius: 24, overflow: 'hidden', position: 'relative',
-    },
+    leafImageContainer: { width: '100%', height: 180, borderRadius: 24, overflow: 'hidden', position: 'relative' },
     leafImage: { width: '100%', height: '100%' },
     leafOverlay: {
         position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,

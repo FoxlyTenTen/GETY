@@ -6,6 +6,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as Location from 'expo-location';
 import { useScan, DEFAULT_SCAN, ScanResult } from '@/context/ScanContext';
+import { supabase } from '@/lib/supabase';
 
 const COLORS = {
     primary: '#1e5b43',
@@ -209,22 +210,124 @@ export default function AnalysisPage() {
     const handleSaveReport = async () => {
         setSaving(true);
         try {
-            // Save to ScanContext (local in-session storage)
+            // ── Step 1: Check auth session ────────────────────────────────
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+                Alert.alert('Not Signed In', 'Please sign in to save a report.');
+                setSaving(false);
+                return;
+            }
+
+            const treeLabel = locationLabel.trim() || scanAddress || 'Unknown Plot';
+
+            // ── Step 2: Find or create tree ───────────────────────────────
+            let treeId: string | null = null;
+            const { data: existingTree } = await supabase
+                .from('trees')
+                .select('id')
+                .eq('user_uid', user.id)
+                .eq('label_name', treeLabel)
+                .maybeSingle();
+
+            if (existingTree) {
+                treeId = existingTree.id;
+                console.log('[save] reusing tree:', treeId);
+            } else {
+                const { data: newTree, error: treeErr } = await supabase
+                    .from('trees')
+                    .insert({
+                        user_uid: user.id,
+                        label_name: treeLabel,
+                        latitude: scanLat ?? null,
+                        longitude: scanLng ?? null,
+                    })
+                    .select('id')
+                    .single();
+                if (treeErr || !newTree) throw new Error(treeErr?.message ?? 'Tree insert failed');
+                treeId = newTree.id;
+                console.log('[save] created tree:', treeId);
+            }
+
+            // ── Step 3: Build recommendation_json (matches DB schema) ─────
+            const recommendationJson = {
+                what_to_do_next: result.whatToDo,
+                keep_your_farm_safe: result.preventionTips,
+                follow_up_action: `Scan these trees again in ${result.followUpDays} days to monitor healing progress.`,
+            };
+
+            // ── Step 4: Insert scan ───────────────────────────────────────
+            const { data: scan, error: scanErr } = await supabase
+                .from('scans')
+                .insert({
+                    tree_id: treeId,
+                    disease_name: result.diseaseName,
+                    disease_description: result.description,
+                    image_url: imageUri || null,
+                    recommendation_json: recommendationJson,
+                    confidence_score: result.confidence,
+                    // DB enum is lowercase: 'low' | 'medium' | 'high'
+                    risk_level: result.risk.toLowerCase() as 'low' | 'medium' | 'high',
+                    follow_up_days: result.followUpDays,
+                    model_version: 'mockup-v1',
+                    status: 'converted_to_plan',
+                })
+                .select('id')
+                .single();
+            if (scanErr || !scan) throw new Error(scanErr?.message ?? 'Scan insert failed');
+            console.log('[save] scan inserted:', scan.id);
+
+            // ── Step 5: Create treatment plan ─────────────────────────────
+            const { data: plan, error: planErr } = await supabase
+                .from('treatment_plans')
+                .insert({
+                    scan_id: scan.id,
+                    tree_id: treeId,
+                    title: `${result.diseaseName} Treatment`,
+                    disease_name: result.diseaseName,
+                    estimated_recovery_days: result.dayPlan,
+                    overall_progress: 0,
+                    status: 'active',
+                    expert_tip: `Apply ${result.fungicide} (${result.waterMix}) and re-scan in ${result.followUpDays} days.`,
+                })
+                .select('id')
+                .single();
+            if (planErr || !plan) throw new Error(planErr?.message ?? 'Plan insert failed');
+            console.log('[save] plan inserted:', plan.id);
+
+            // ── Step 6: Insert 4 treatment steps ──────────────────────────
+            const addDaysISO = (d: number) =>
+                new Date(Date.now() + d * 864e5).toISOString();
+
+            const { error: stepsErr } = await supabase
+                .from('treatment_plan_steps')
+                .insert([
+                    { treatment_plan_id: plan.id, step_order: 1, title: 'Initial Application',
+                      description: 'Apply first fungicide spray at full dose.',
+                      status: 'ongoing',  due_date: addDaysISO(0) },
+                    { treatment_plan_id: plan.id, step_order: 2, title: 'Secondary Spray',
+                      description: 'Follow-up spray. Check leaf coverage.',
+                      status: 'upcoming', due_date: addDaysISO(Math.floor(result.dayPlan * 0.3)) },
+                    { treatment_plan_id: plan.id, step_order: 3, title: 'Observation Period',
+                      description: 'Monitor leaf recovery and note progress.',
+                      status: 'upcoming', due_date: addDaysISO(Math.floor(result.dayPlan * 0.6)) },
+                    { treatment_plan_id: plan.id, step_order: 4, title: 'Final Assessment',
+                      description: 'Final check — verify tree health status.',
+                      status: 'locked',   due_date: addDaysISO(result.dayPlan) },
+                ]);
+            if (stepsErr) throw new Error(stepsErr?.message ?? 'Steps insert failed');
+            console.log('[save] steps inserted');
+
+            // ── Step 7: Save locally to ScanContext too ───────────────────
             setCurrentScan(scanResult);
             saveToHistory(scanResult);
 
-            // TODO: When ready, add your Supabase save logic here.
-            // Import { supabase } from '@/lib/supabase' and call your insert queries.
-
             Alert.alert(
                 '✅ Report Saved',
-                'Your scan was saved locally. View your treatment milestones now?',
+                `Scan saved to database!\n\nDisease: ${result.diseaseName}\nTree: ${treeLabel}`,
                 [
                     {
                         text: 'View Milestones',
-                        onPress: () => {
-                            router.replace('/(tabs)/reminder' as any);
-                        },
+                        onPress: () => router.replace('/(tabs)/milestone' as any),
                     },
                     {
                         text: 'Go Home',
@@ -234,8 +337,8 @@ export default function AnalysisPage() {
                 ]
             );
         } catch (e: any) {
-            console.error('handleSaveReport error:', e?.message ?? e);
-            Alert.alert('Error', 'Failed to save report. Please try again.');
+            console.error('[save] error:', e?.message ?? e);
+            Alert.alert('Save Failed', `Error: ${e?.message ?? 'Unknown error'}\n\nCheck console for details.`);
         } finally {
             setSaving(false);
         }
