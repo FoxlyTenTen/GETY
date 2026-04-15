@@ -478,6 +478,180 @@ async function getScanDetail(scanId: string) {
 
 ---
 
+## Step 6 — Knowledge Base Storage (Admin Feature)
+
+Run these queries to set up the admin knowledge base upload system.
+
+### 6a. Create `knowledge_base_files` Table
+
+```sql
+CREATE TABLE knowledge_base_files (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    filename TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    file_size BIGINT,
+    mime_type TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    uploaded_by UUID REFERENCES auth.users(id),
+    uploaded_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX idx_kb_files_uploaded_at ON knowledge_base_files(uploaded_at DESC);
+
+-- Reuses the set_updated_at() function from Step 3
+CREATE TRIGGER trg_kb_files_updated_at
+    BEFORE UPDATE ON knowledge_base_files
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+```
+
+### 6b. RLS Policies for `knowledge_base_files`
+
+```sql
+ALTER TABLE knowledge_base_files ENABLE ROW LEVEL SECURITY;
+
+-- Admins can do everything
+CREATE POLICY "Admin full access" ON knowledge_base_files
+    FOR ALL
+    USING (EXISTS (SELECT 1 FROM users WHERE users.id = auth.uid() AND users.role = 'admin'))
+    WITH CHECK (EXISTS (SELECT 1 FROM users WHERE users.id = auth.uid() AND users.role = 'admin'));
+
+-- All authenticated users can read
+CREATE POLICY "Authenticated read" ON knowledge_base_files
+    FOR SELECT USING (auth.role() = 'authenticated');
+```
+
+### 6c. Create Storage Bucket
+
+```sql
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES ('knowledge-base', 'knowledge-base', false, 10485760, ARRAY['application/pdf', 'text/plain']);
+```
+
+### 6d. Storage RLS Policies
+
+```sql
+-- Admin can upload
+CREATE POLICY "Admin upload KB" ON storage.objects FOR INSERT
+    WITH CHECK (bucket_id = 'knowledge-base' AND EXISTS (
+        SELECT 1 FROM users WHERE users.id = auth.uid() AND users.role = 'admin'));
+
+-- Admin can delete
+CREATE POLICY "Admin delete KB" ON storage.objects FOR DELETE
+    USING (bucket_id = 'knowledge-base' AND EXISTS (
+        SELECT 1 FROM users WHERE users.id = auth.uid() AND users.role = 'admin'));
+
+-- All authenticated users can read/download
+CREATE POLICY "Authenticated download KB" ON storage.objects FOR SELECT
+    USING (bucket_id = 'knowledge-base' AND auth.role() = 'authenticated');
+```
+
+> [!TIP]
+> To make a user an admin: `UPDATE public.users SET role = 'admin' WHERE email = 'your@email.com';`
+
+---
+
+## Step 7 — RAG System (pgvector + Embeddings)
+
+Run these queries to set up the RAG (Retrieval-Augmented Generation) system.
+
+### 7a. Enable pgvector Extension
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+```
+
+### 7b. Create `knowledge_base_chunks` Table
+
+```sql
+CREATE TABLE knowledge_base_chunks (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    file_id     UUID NOT NULL REFERENCES knowledge_base_files(id) ON DELETE CASCADE,
+    content     TEXT NOT NULL,
+    embedding   vector(768),
+    chunk_index INTEGER NOT NULL,
+    metadata    JSONB DEFAULT '{}',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Vector similarity search index
+CREATE INDEX idx_chunks_embedding ON knowledge_base_chunks
+    USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+
+-- File lookup index
+CREATE INDEX idx_chunks_file_id ON knowledge_base_chunks(file_id);
+```
+
+### 7c. Add Processing Columns to `knowledge_base_files`
+
+```sql
+ALTER TABLE knowledge_base_files
+    ADD COLUMN processing_status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (processing_status IN ('pending', 'processing', 'completed', 'failed'));
+
+ALTER TABLE knowledge_base_files
+    ADD COLUMN processing_error TEXT;
+
+ALTER TABLE knowledge_base_files
+    ADD COLUMN chunk_count INTEGER DEFAULT 0;
+```
+
+### 7d. RLS for Chunks
+
+```sql
+ALTER TABLE knowledge_base_chunks ENABLE ROW LEVEL SECURITY;
+
+-- All authenticated users can read (needed for RAG queries)
+CREATE POLICY "Authenticated read chunks" ON knowledge_base_chunks
+    FOR SELECT USING (auth.role() = 'authenticated');
+
+-- Service role (Edge Functions) can manage all chunks
+CREATE POLICY "Service role manage chunks" ON knowledge_base_chunks
+    FOR ALL USING (auth.role() = 'service_role');
+```
+
+### 7e. Vector Search Function
+
+```sql
+CREATE OR REPLACE FUNCTION match_chunks(
+    query_embedding vector(768),
+    match_count int DEFAULT 5,
+    match_threshold float DEFAULT 0.3
+)
+RETURNS TABLE (
+    id uuid,
+    content text,
+    chunk_index int,
+    metadata jsonb,
+    filename text,
+    similarity float
+)
+LANGUAGE plpgsql AS $$
+BEGIN
+    RETURN QUERY
+    SELECT kbc.id, kbc.content, kbc.chunk_index, kbc.metadata,
+           kbf.filename,
+           1 - (kbc.embedding <=> query_embedding) AS similarity
+    FROM knowledge_base_chunks kbc
+    JOIN knowledge_base_files kbf ON kbf.id = kbc.file_id
+    WHERE kbf.processing_status = 'completed'
+      AND 1 - (kbc.embedding <=> query_embedding) > match_threshold
+    ORDER BY kbc.embedding <=> query_embedding
+    LIMIT match_count;
+END;
+$$;
+```
+
+> [!NOTE]
+> After running Step 7, deploy the Edge Functions (`process-knowledge-base` and `rag-query`) using the Supabase CLI:
+> ```bash
+> supabase secrets set GEMINI_API_KEY=your-gemini-api-key
+> supabase functions deploy process-knowledge-base
+> supabase functions deploy rag-query
+> ```
+
+---
+
 ## Table Relationships
 
 ```
@@ -485,13 +659,18 @@ auth.users  (Supabase built-in — controls login)
     │
     └── public.users  (your profile table — synced via trigger)
             │
-            └── trees  (user_uid → public.users.id)
-                    │
-                    └── scans  (tree_id → trees.id)
-                            │
-                            └── treatment_plans  (scan_id, tree_id) [1-to-1 with scan]
-                                        │
-                                        └── treatment_plan_steps  (treatment_plan_id)
-                                                    │
-                                                    └── treatment_step_updates  (treatment_plan_step_id)
+            ├── trees  (user_uid → public.users.id)
+            │       │
+            │       └── scans  (tree_id → trees.id)
+            │               │
+            │               └── treatment_plans  (scan_id, tree_id) [1-to-1 with scan]
+            │                           │
+            │                           └── treatment_plan_steps  (treatment_plan_id)
+            │                                       │
+            │                                       └── treatment_step_updates  (treatment_plan_step_id)
+            │
+            └── knowledge_base_files  (uploaded_by → auth.users.id)  [admin only]
+                    ├── Storage: knowledge-base bucket  (PDF/TXT files)
+                    └── knowledge_base_chunks  (file_id → knowledge_base_files.id)
+                            └── embedding vector(768)  [pgvector, used by RAG queries]
 ```

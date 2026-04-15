@@ -10,6 +10,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import AppHeader from '@/components/common/AppHeader';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/context/AuthContext';
 
 const { width } = Dimensions.get('window');
 
@@ -47,6 +48,7 @@ function formatDue(iso: string | null) {
 // ─── Main Component ─────────────────────────────────────────────────────────────
 
 export default function Index() {
+    const { isAdmin } = useAuth();
     const [data, setData]           = useState<HomeData | null>(null);
     const [loading, setLoading]     = useState(true);
     const [alertDismissed, setAlertDismissed] = useState(false);
@@ -328,6 +330,19 @@ export default function Index() {
                     </TouchableOpacity>
                 </View>
 
+                {/* ── Admin: Knowledge Base ── */}
+                {isAdmin && (
+                    <TouchableOpacity
+                        style={styles.adminBtn}
+                        activeOpacity={0.88}
+                        onPress={() => router.push('/admin/knowledge-base-upload')}
+                    >
+                        <Ionicons name="cloud-upload-outline" size={20} color="#1e5b43" />
+                        <Text style={styles.adminBtnText}>Knowledge Base</Text>
+                        <Ionicons name="chevron-forward" size={18} color="#9ca3af" />
+                    </TouchableOpacity>
+                )}
+
                 {/* ── Decorative Leaf Image ── */}
                 <View style={styles.leafImageContainer}>
                     <Image
@@ -419,6 +434,13 @@ const styles = StyleSheet.create({
         backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center',
     },
     actionLabel: { fontSize: 13, fontWeight: '700', color: '#374151' },
+
+    adminBtn: {
+        flexDirection: 'row', alignItems: 'center', gap: 10,
+        backgroundColor: '#f0fdf4', borderRadius: 16, padding: 16,
+        marginBottom: 20, borderWidth: 1, borderColor: '#bbf7d0',
+    },
+    adminBtnText: { flex: 1, fontSize: 15, fontWeight: '600', color: '#1e5b43' },
 
     leafImageContainer: { width: '100%', height: 180, borderRadius: 24, overflow: 'hidden', position: 'relative' },
     leafImage: { width: '100%', height: '100%' },
