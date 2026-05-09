@@ -39,30 +39,109 @@ function buildSteps(dayPlan: number) {
     ];
 }
 
-// ── Pure local mockup disease data ──────────────────────────────────────────────
-// Replace this with real AI/model output when integrating
-const MOCKUP_DISEASE_DATA = [
-    {
-        name: 'Pestalotiopsis Leaf Fall',
-        risk_level: 'High' as const,
-        description: 'Circular brown spots detected on the leaves. This is Pestalotiopsis, a common fungus that causes early leaf fall, reducing latex yield significantly.',
+// ── Disease data keyed by TFLite model class name ────────────────────────────
+const DISEASE_DATA: Record<string, {
+    name: string;
+    risk_level: 'Low' | 'Medium' | 'High';
+    description: string;
+    what_to_do: string[];
+    prevention_tips: { title: string; desc: string }[];
+    recommended_fungicide: string;
+    water_mix_ratio: string;
+    default_day_plan: number;
+    follow_up_days: number;
+}> = {
+    Bird_Eye_Spot: {
+        name: 'Bird Eye Spot',
+        risk_level: 'Medium',
+        description: 'Small circular lesions with dark brown centres and yellow halos detected. Bird\'s Eye Spot (Helminthosporium heveae) is triggered by rain and humid conditions during refoliation.',
         what_to_do: [
-            'Prune infected branches immediately and burn them away from the estate.',
-            'Apply copper-based fungicide spray during the next dry spell.',
-            'Isolate affected trees to prevent spread to neighbouring rows.',
+            'Apply copper oxychloride or mancozeb during the early leaf flush stage.',
+            'Collect and destroy fallen infected leaves to reduce spore load.',
+            'Avoid overhead irrigation that prolongs leaf wetness.',
         ],
         prevention_tips: [
-            { title: 'Water Drainage', desc: 'Ensure good drainage in low-lying areas to prevent waterlogging.' },
-            { title: 'Tree Spacing', desc: 'Maintain 5–6 m spacing to allow airflow between canopies.' },
+            { title: 'Leaf Flush Timing', desc: 'Monitor closely during the refoliation period when leaves are most vulnerable.' },
+            { title: 'Canopy Airflow', desc: 'Prune to open the canopy and reduce humidity around foliage.' },
         ],
-        recommended_fungicide: 'Mancozeb 80WP',
+        recommended_fungicide: 'Copper Oxychloride 50WP',
         water_mix_ratio: '20L Water Mix',
         default_day_plan: 14,
         follow_up_days: 14,
     },
-    {
-        name: 'Rubber Powdery Mildew',
-        risk_level: 'Medium' as const,
+    Colletotrichum: {
+        name: 'Colletotrichum (Anthracnose)',
+        risk_level: 'Low',
+        description: 'Small anthracnose lesions observed on young leaves. Colletotrichum infection is common during wet refoliation periods but manageable with timely treatment.',
+        what_to_do: [
+            'Spray with carbendazim or thiophanate-methyl during refoliation.',
+            'Collect and burn fallen infected leaves.',
+        ],
+        prevention_tips: [
+            { title: 'Timing', desc: 'Schedule fungicide application before the refoliation flush.' },
+            { title: 'Spacing', desc: 'Maintain open canopy to reduce moisture retention.' },
+        ],
+        recommended_fungicide: 'Carbendazim 50WP',
+        water_mix_ratio: '10L Water Mix',
+        default_day_plan: 7,
+        follow_up_days: 7,
+    },
+    Corynespora: {
+        name: 'Corynespora Leaf Fall',
+        risk_level: 'High',
+        description: 'Distinctive "fish-bone" necrotic lesions detected along the midrib. Corynespora cassiicola causes premature leaf drop and can severely reduce latex yield if left untreated.',
+        what_to_do: [
+            'Apply tebuconazole or propiconazole systemic fungicide immediately.',
+            'Remove and destroy heavily infected leaves before treatment begins.',
+            'Isolate affected rows and monitor neighbouring trees weekly.',
+        ],
+        prevention_tips: [
+            { title: 'Clone Selection', desc: 'Favour Corynespora-resistant clones when replanting.' },
+            { title: 'Early Scouting', desc: 'Inspect trees weekly during wet seasons for early detection.' },
+        ],
+        recommended_fungicide: 'Tebuconazole 25WG',
+        water_mix_ratio: '20L Water Mix',
+        default_day_plan: 21,
+        follow_up_days: 21,
+    },
+    Healthy: {
+        name: 'Healthy',
+        risk_level: 'Low',
+        description: 'No signs of disease detected. The leaf appears healthy with no visible lesions, discolouration, or abnormal growth patterns.',
+        what_to_do: [
+            'Continue regular monitoring on a weekly basis.',
+            'Maintain current fertilisation and irrigation schedule.',
+        ],
+        prevention_tips: [
+            { title: 'Routine Scouting', desc: 'Scout your estate weekly to catch early signs of infection.' },
+            { title: 'Balanced Nutrition', desc: 'Ensure adequate potassium and magnesium to maintain leaf health.' },
+        ],
+        recommended_fungicide: 'None required',
+        water_mix_ratio: 'N/A',
+        default_day_plan: 7,
+        follow_up_days: 30,
+    },
+    Leaf_Blight: {
+        name: 'Fusicoccum Leaf Blight',
+        risk_level: 'High',
+        description: 'Dark water-soaked lesions found on leaves and young shoots. Leaf blight thrives in wet conditions and spreads rapidly through rain splash and wind.',
+        what_to_do: [
+            'Apply phosphonate-based systemic fungicide to all affected trees.',
+            'Remove and destroy fallen leaves from the base of trees.',
+            'Avoid working in affected areas during rainy weather.',
+        ],
+        prevention_tips: [
+            { title: 'Drainage', desc: 'Ensure water does not pool at the base of trees.' },
+            { title: 'Ground Cover', desc: 'Use mulch to prevent rain splash from infecting lower leaves.' },
+        ],
+        recommended_fungicide: 'Fosetyl-Al 80WP',
+        water_mix_ratio: '25L Water Mix',
+        default_day_plan: 21,
+        follow_up_days: 21,
+    },
+    Powdery_Mildew: {
+        name: 'Powdery Mildew (Oidium)',
+        risk_level: 'Medium',
         description: 'White powdery coating detected on leaf surfaces. Likely Oidium heveae affecting the upper canopy. Early intervention can prevent yield loss.',
         what_to_do: [
             'Apply wettable sulfur or trifloxystrobin fungicide immediately.',
@@ -78,79 +157,99 @@ const MOCKUP_DISEASE_DATA = [
         default_day_plan: 10,
         follow_up_days: 10,
     },
-    {
-        name: 'Phytophthora Leaf Blight',
-        risk_level: 'High' as const,
-        description: 'Dark water-soaked lesions found on leaves and young shoots. Phytophthora thrives in wet conditions and spreads rapidly through rain splash.',
-        what_to_do: [
-            'Apply phosphonate-based systemic fungicide to all affected trees.',
-            'Remove and destroy fallen leaves from the base of trees.',
-            'Avoid working in affected areas during rainy weather.',
-        ],
-        prevention_tips: [
-            { title: 'Drainage', desc: 'Ensure water does not pool at the base of trees.' },
-            { title: 'Ground Cover', desc: 'Use mulch to prevent rain splash from infecting lower leaves.' },
-        ],
-        recommended_fungicide: 'Fosetyl-Al 80WP',
-        water_mix_ratio: '25L Water Mix',
-        default_day_plan: 21,
-        follow_up_days: 21,
-    },
-    {
-        name: 'Colletotrichum Leaf Disease',
-        risk_level: 'Low' as const,
-        description: 'Small anthracnose lesions observed on young leaves. Colletotrichum infection is common during wet re-foliation periods but manageable with timely treatment.',
-        what_to_do: [
-            'Spray with carbendazim or thiophanate-methyl during re-foliation.',
-            'Collect and burn fallen infected leaves.',
-        ],
-        prevention_tips: [
-            { title: 'Timing', desc: 'Schedule fungicide application before the re-foliation flush.' },
-            { title: 'Spacing', desc: 'Maintain open canopy to reduce moisture retention.' },
-        ],
-        recommended_fungicide: 'Carbendazim 50WP',
-        water_mix_ratio: '10L Water Mix',
-        default_day_plan: 7,
-        follow_up_days: 7,
-    },
-];
+};
+
+// ── Backend URL — update to match your server address ────────────────────────
+// Android emulator: http://10.0.2.2:8000  |  Physical device: http://<your-pc-ip>:8000
+const BACKEND_URL = 'http://10.145.51.87:8000';
 
 export default function AnalysisPage() {
     const { imageUri } = useLocalSearchParams<{ imageUri: string }>();
     const { setCurrentScan, saveToHistory } = useScan();
 
-    // ── Pure mockup — randomly pick a disease from local data ─────────────────
     const [mockResult, setMockResult] = useState<ScanResult>({
         ...DEFAULT_SCAN,
         id: `scan-${Date.now()}`,
     });
+    const [predicting, setPredicting] = useState(true);
+    const [predictError, setPredictError] = useState<string | null>(null);
+    const [notALeaf, setNotALeaf] = useState(false);
+    const [allProbabilities, setAllProbabilities] = useState<{ label: string; prob: number }[]>([]);
     const [saving, setSaving] = useState(false);
 
-    useEffect(() => {
-        // Pick a random mockup disease (replace with real ML result later)
-        const diseaseData = MOCKUP_DISEASE_DATA[Math.floor(Math.random() * MOCKUP_DISEASE_DATA.length)];
-        const confidence = Math.floor(Math.random() * 15) + 82; // 82–96%
-        const steps = buildSteps(diseaseData.default_day_plan);
+    // Returns true when model output is too uncertain to trust
+    const isUnreliable = (probs: Record<string, number>, topConf: number): boolean => {
+        if (topConf < 0.60) return true; // low confidence threshold
+        // Shannon entropy check: max entropy for 6 classes = ln(6) ≈ 1.792
+        const entropy = -Object.values(probs).reduce((sum, p) => sum + (p > 0 ? p * Math.log(p) : 0), 0);
+        const maxEntropy = Math.log(Object.keys(probs).length);
+        return entropy / maxEntropy > 0.80; // spread too evenly across classes
+    };
 
-        setMockResult({
-            id: `scan-${Date.now()}`,
-            diseaseName: diseaseData.name,
-            confidence,
-            risk: diseaseData.risk_level,
-            description: diseaseData.description,
-            whatToDo: diseaseData.what_to_do,
-            preventionTips: diseaseData.prevention_tips,
-            fungicide: diseaseData.recommended_fungicide,
-            waterMix: diseaseData.water_mix_ratio,
-            dayPlan: diseaseData.default_day_plan,
-            followUpDays: diseaseData.follow_up_days,
-            treatmentSteps: steps,
-            imageUri: imageUri || undefined,
-            scanDate: new Date().toLocaleDateString('en-MY', {
-                day: 'numeric', month: 'short', year: 'numeric',
-            }),
-            location: '', // will be set by user via label input
-        });
+    useEffect(() => {
+        if (!imageUri) {
+            setPredicting(false);
+            return;
+        }
+        (async () => {
+            try {
+                const formData = new FormData();
+                formData.append('file', {
+                    uri: imageUri,
+                    name: 'leaf.jpg',
+                    type: 'image/jpeg',
+                } as any);
+
+                const res = await fetch(`${BACKEND_URL}/predict`, {
+                    method: 'POST',
+                    body: formData,
+                });
+                if (!res.ok) {
+                    const err = await res.text();
+                    throw new Error(err);
+                }
+                const json: { disease: string; confidence: number; all_probabilities: Record<string, number> } = await res.json();
+
+                const ranked = Object.entries(json.all_probabilities)
+                    .map(([cls, prob]) => ({ label: DISEASE_DATA[cls]?.name ?? cls.replace(/_/g, ' '), prob }))
+                    .sort((a, b) => b.prob - a.prob);
+                setAllProbabilities(ranked);
+
+                if (isUnreliable(json.all_probabilities, json.confidence)) {
+                    setNotALeaf(true);
+                    setPredicting(false);
+                    return;
+                }
+
+                const diseaseData = DISEASE_DATA[json.disease] ?? DISEASE_DATA['Healthy'];
+                const confidencePct = Math.round(json.confidence * 100);
+                const steps = buildSteps(diseaseData.default_day_plan);
+
+                setMockResult({
+                    id: `scan-${Date.now()}`,
+                    diseaseName: diseaseData.name,
+                    confidence: confidencePct,
+                    risk: diseaseData.risk_level,
+                    description: diseaseData.description,
+                    whatToDo: diseaseData.what_to_do,
+                    preventionTips: diseaseData.prevention_tips,
+                    fungicide: diseaseData.recommended_fungicide,
+                    waterMix: diseaseData.water_mix_ratio,
+                    dayPlan: diseaseData.default_day_plan,
+                    followUpDays: diseaseData.follow_up_days,
+                    treatmentSteps: steps,
+                    imageUri: imageUri || undefined,
+                    scanDate: new Date().toLocaleDateString('en-MY', {
+                        day: 'numeric', month: 'short', year: 'numeric',
+                    }),
+                    location: '',
+                });
+            } catch (e: any) {
+                setPredictError(e?.message ?? 'Prediction failed');
+            } finally {
+                setPredicting(false);
+            }
+        })();
     }, []);
 
     // ── GPS State ────────────────────────────────────────────────────────────
@@ -268,7 +367,7 @@ export default function AnalysisPage() {
                     // DB enum is lowercase: 'low' | 'medium' | 'high'
                     risk_level: result.risk.toLowerCase() as 'low' | 'medium' | 'high',
                     follow_up_days: result.followUpDays,
-                    model_version: 'mockup-v1',
+                    model_version: 'best_float32-tflite-v1',
                     status: 'converted_to_plan',
                 })
                 .select('id')
@@ -346,6 +445,101 @@ export default function AnalysisPage() {
 
     const result = scanResult;
 
+    if (predicting) {
+        return (
+            <SafeAreaView style={[styles.safeArea, { alignItems: 'center', justifyContent: 'center', gap: 16 }]}>
+                <ActivityIndicator size="large" color={COLORS.primary} />
+                <Text style={{ color: COLORS.textMuted, fontSize: 15 }}>Analysing leaf image...</Text>
+            </SafeAreaView>
+        );
+    }
+
+    if (notALeaf) {
+        return (
+            <SafeAreaView style={[styles.safeArea, { padding: 32 }]}>
+                <TouchableOpacity onPress={() => router.back()} style={{ marginBottom: 24 }}>
+                    <Ionicons name="arrow-back" size={24} color={COLORS.textMain} />
+                </TouchableOpacity>
+                <View style={{ alignItems: 'center', gap: 16, marginBottom: 32 }}>
+                    <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: '#fff3cd', alignItems: 'center', justifyContent: 'center' }}>
+                        <Ionicons name="scan-outline" size={36} color="#b45309" />
+                    </View>
+                    <Text style={{ fontSize: 20, fontWeight: '800', color: '#1a1a1a', textAlign: 'center' }}>
+                        No Rubber Leaf Detected
+                    </Text>
+                    <Text style={{ fontSize: 14, color: COLORS.textMuted, textAlign: 'center', lineHeight: 22 }}>
+                        The model could not confidently identify a rubber leaf in this image. This may happen if the image is blurry, too far away, or does not show a leaf.
+                    </Text>
+                </View>
+
+                {/* Show what it detected anyway for transparency */}
+                {allProbabilities.length > 0 && (
+                    <View style={[styles.card, { marginBottom: 24 }]}>
+                        <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.textMuted, marginBottom: 12 }}>
+                            MODEL OUTPUT (LOW CONFIDENCE)
+                        </Text>
+                        {allProbabilities.map((item, idx) => (
+                            <View key={item.label} style={{ marginBottom: 8 }}>
+                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3 }}>
+                                    <Text style={{ fontSize: 12, color: idx === 0 ? '#b45309' : COLORS.textMuted, fontWeight: idx === 0 ? '700' : '400' }}>
+                                        {item.label}
+                                    </Text>
+                                    <Text style={{ fontSize: 12, color: idx === 0 ? '#b45309' : COLORS.textMuted, fontWeight: '700' }}>
+                                        {(item.prob * 100).toFixed(1)}%
+                                    </Text>
+                                </View>
+                                <View style={{ height: 6, backgroundColor: '#e5e7eb', borderRadius: 3, overflow: 'hidden' }}>
+                                    <View style={{ height: 6, width: `${item.prob * 100}%` as any, backgroundColor: idx === 0 ? '#f59e0b' : '#d1d5db', borderRadius: 3 }} />
+                                </View>
+                            </View>
+                        ))}
+                    </View>
+                )}
+
+                <View style={{ gap: 12 }}>
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.textMain, marginBottom: 4 }}>Tips for a better scan:</Text>
+                    {[
+                        'Hold the camera 20–30 cm from the leaf',
+                        'Ensure the leaf fills most of the frame',
+                        'Scan in good natural lighting, avoid shadows',
+                        'Use a single leaf, not a cluster',
+                    ].map((tip, i) => (
+                        <View key={i} style={{ flexDirection: 'row', gap: 10, alignItems: 'flex-start' }}>
+                            <Ionicons name="checkmark-circle" size={16} color={COLORS.primary} style={{ marginTop: 2 }} />
+                            <Text style={{ fontSize: 13, color: COLORS.textMain, flex: 1 }}>{tip}</Text>
+                        </View>
+                    ))}
+                </View>
+
+                <TouchableOpacity
+                    style={[styles.primaryBtn, { marginTop: 32 }]}
+                    onPress={() => router.back()}
+                    activeOpacity={0.9}
+                >
+                    <Ionicons name="camera" size={20} color="#fff" />
+                    <Text style={styles.primaryBtnText}>Scan Again</Text>
+                </TouchableOpacity>
+            </SafeAreaView>
+        );
+    }
+
+    if (predictError) {
+        return (
+            <SafeAreaView style={[styles.safeArea, { alignItems: 'center', justifyContent: 'center', padding: 32, gap: 16 }]}>
+                <Ionicons name="warning" size={40} color="#c62828" />
+                <Text style={{ color: '#c62828', fontSize: 16, fontWeight: '700', textAlign: 'center' }}>
+                    Could not analyse image
+                </Text>
+                <Text style={{ color: COLORS.textMuted, fontSize: 13, textAlign: 'center' }}>
+                    {predictError}
+                </Text>
+                <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 8 }}>
+                    <Text style={{ color: COLORS.primary, fontWeight: '700' }}>Go Back</Text>
+                </TouchableOpacity>
+            </SafeAreaView>
+        );
+    }
+
     return (
         <SafeAreaView style={styles.safeArea}>
             <StatusBar barStyle="dark-content" />
@@ -394,6 +588,37 @@ export default function AnalysisPage() {
                         resizeMode="cover"
                     />
                 </View>
+
+                {/* Section 1b: All class probabilities */}
+                {allProbabilities.length > 0 && (
+                    <View style={styles.card}>
+                        <View style={styles.cardHeader}>
+                            <View style={[styles.iconBox, { backgroundColor: '#e0f2fe' }]}>
+                                <Ionicons name="stats-chart" size={16} color="#0369a1" />
+                            </View>
+                            <Text style={styles.cardTitle}>Detection Confidence</Text>
+                        </View>
+                        {allProbabilities.map((item, idx) => {
+                            const pct = item.prob * 100;
+                            const isTop = idx === 0;
+                            return (
+                                <View key={item.label} style={{ marginBottom: 10 }}>
+                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                                        <Text style={{ fontSize: 13, fontWeight: isTop ? '800' : '500', color: isTop ? COLORS.primary : COLORS.textMuted }}>
+                                            {item.label}
+                                        </Text>
+                                        <Text style={{ fontSize: 13, fontWeight: '700', color: isTop ? COLORS.primary : COLORS.textMuted }}>
+                                            {pct.toFixed(1)}%
+                                        </Text>
+                                    </View>
+                                    <View style={{ height: 8, backgroundColor: '#e5e7eb', borderRadius: 4, overflow: 'hidden' }}>
+                                        <View style={{ height: 8, width: `${pct}%` as any, backgroundColor: isTop ? COLORS.primary : '#a8e6cf', borderRadius: 4 }} />
+                                    </View>
+                                </View>
+                            );
+                        })}
+                    </View>
+                )}
 
                 {/* Section 2: What to do next */}
                 <View style={styles.card}>
