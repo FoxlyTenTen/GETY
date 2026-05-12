@@ -652,6 +652,80 @@ $$;
 
 ---
 
+## Step 8 — Hybrid Search (BM25 + Semantic) for RAG Accuracy
+
+Run these queries to enable hybrid search on the `documents` table used by the RAG backend. This fixes cases where the AI cannot find disease-specific content (e.g. "how to prevent Oidium") because pure semantic search misses chunks that use different phrasing or Malay terms.
+
+### 8a. Add Full-Text Search Column + Index
+
+```sql
+-- Auto-populated full-text search column
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS fts tsvector
+  GENERATED ALWAYS AS (to_tsvector('english', content)) STORED;
+
+-- GIN index for fast keyword search
+CREATE INDEX IF NOT EXISTS documents_fts_idx ON documents USING gin(fts);
+```
+
+### 8b. Create `hybrid_search_documents` RPC Function
+
+This function combines semantic (vector) search and keyword (BM25) search using **Reciprocal Rank Fusion (RRF)** — results from both methods are merged and ranked without manual weight tuning.
+
+```sql
+CREATE OR REPLACE FUNCTION hybrid_search_documents(
+  query_text      text,
+  query_embedding vector(768),
+  match_count     int DEFAULT 8,
+  rrf_k           int DEFAULT 60
+)
+RETURNS TABLE (
+  id          uuid,
+  content     text,
+  metadata    jsonb,
+  similarity  float
+)
+LANGUAGE sql
+AS $$
+  WITH semantic AS (
+    SELECT id, content, metadata,
+           1 - (embedding <=> query_embedding) AS score,
+           ROW_NUMBER() OVER (ORDER BY embedding <=> query_embedding) AS rank
+    FROM documents
+    ORDER BY embedding <=> query_embedding
+    LIMIT match_count * 2
+  ),
+  keyword AS (
+    SELECT id, content, metadata,
+           ts_rank(fts, plainto_tsquery('english', query_text)) AS score,
+           ROW_NUMBER() OVER (ORDER BY ts_rank(fts, plainto_tsquery('english', query_text)) DESC) AS rank
+    FROM documents
+    WHERE fts @@ plainto_tsquery('english', query_text)
+    LIMIT match_count * 2
+  ),
+  combined AS (
+    SELECT
+      COALESCE(s.id, k.id) AS id,
+      COALESCE(s.content, k.content) AS content,
+      COALESCE(s.metadata, k.metadata) AS metadata,
+      COALESCE(1.0/(rrf_k + s.rank), 0) + COALESCE(1.0/(rrf_k + k.rank), 0) AS rrf_score
+    FROM semantic s
+    FULL OUTER JOIN keyword k ON s.id = k.id
+  )
+  SELECT id, content, metadata, rrf_score AS similarity
+  FROM combined
+  ORDER BY rrf_score DESC
+  LIMIT match_count;
+$$;
+```
+
+> [!NOTE]
+> This RPC is called from `supabase_client.py` via the `hybrid_search()` helper function. Both `agent.py` (chat assistant) and `rag_structured.py` (disease info + milestones) use it instead of plain `similarity_search`.
+
+> [!TIP]
+> After running this SQL, restart the backend. No re-ingestion needed — the `fts` column auto-populates from existing `content` values.
+
+---
+
 ## Table Relationships
 
 ```

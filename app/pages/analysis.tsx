@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as Location from 'expo-location';
-import { useScan, DEFAULT_SCAN, ScanResult } from '@/context/ScanContext';
+import { useScan, ScanResult, TreatmentStep } from '@/context/ScanContext';
 import { supabase } from '@/lib/supabase';
 
 const COLORS = {
@@ -23,195 +23,133 @@ const COLORS = {
     followUpBg: '#e8f5e9',
 };
 
-// Helper: build treatment steps from a day plan duration
-function buildSteps(dayPlan: number) {
-    const today = new Date();
-    const addDays = (d: number): string => {
-        const dt = new Date(today);
-        dt.setDate(dt.getDate() + d);
-        return dt.toLocaleDateString('en-MY', { day: 'numeric', month: 'short' }); // e.g. "28 Mar"
-    };
+// ── Date helper ──────────────────────────────────────────────────────────────
+function formatDateOffset(daysFromNow: number): string {
+    const dt = new Date();
+    dt.setDate(dt.getDate() + daysFromNow);
+    return dt.toLocaleDateString('en-MY', { day: 'numeric', month: 'short' });
+}
+
+// ── Fallback steps (used for Healthy class or when /generate-milestones fails) ─
+function buildFallbackSteps(dayPlan: number): TreatmentStep[] {
     return [
-        { id: 1, title: 'Initial Application',   desc: 'Apply first fungicide spray at full dose.',         status: 'current'  as const, date: addDays(0) },
-        { id: 2, title: 'Secondary Spray',        desc: 'Follow-up spray. Check leaf coverage.',             status: 'upcoming' as const, date: addDays(Math.floor(dayPlan * 0.3)) },
-        { id: 3, title: 'Observation Period',     desc: 'Monitor leaf recovery and note progress.',          status: 'upcoming' as const, date: addDays(Math.floor(dayPlan * 0.6)) },
-        { id: 4, title: 'Final Assessment',       desc: 'Final check — verify tree health status.',          status: 'upcoming' as const, date: addDays(dayPlan) },
+        { id: 1, title: 'Initial Application',  desc: 'Apply first fungicide spray at full dose.',        status: 'current',  date: formatDateOffset(0) },
+        { id: 2, title: 'Secondary Spray',       desc: 'Follow-up spray. Check leaf coverage.',            status: 'upcoming', date: formatDateOffset(Math.floor(dayPlan * 0.3)) },
+        { id: 3, title: 'Observation Period',    desc: 'Monitor leaf recovery and note progress.',         status: 'upcoming', date: formatDateOffset(Math.floor(dayPlan * 0.6)) },
+        { id: 4, title: 'Final Assessment',      desc: 'Final check — verify tree health status.',         status: 'upcoming', date: formatDateOffset(dayPlan) },
     ];
 }
 
-// ── Disease data keyed by TFLite model class name ────────────────────────────
-const DISEASE_DATA: Record<string, {
-    name: string;
-    risk_level: 'Low' | 'Medium' | 'High';
-    description: string;
-    what_to_do: string[];
+// ── Static fallback data (shown immediately while RAG loads, or if RAG fails) ─
+type StaticEntry = {
+    name: string; risk_level: 'Low' | 'Medium' | 'High';
+    description: string; what_to_do: string[];
     prevention_tips: { title: string; desc: string }[];
-    recommended_fungicide: string;
-    water_mix_ratio: string;
-    default_day_plan: number;
-    follow_up_days: number;
-}> = {
+    recommended_fungicide: string; water_mix_ratio: string;
+    default_day_plan: number; follow_up_days: number;
+};
+const STATIC_FALLBACK: Record<string, StaticEntry> = {
     Bird_Eye_Spot: {
-        name: 'Bird Eye Spot',
-        risk_level: 'Medium',
-        description: 'Small circular lesions with dark brown centres and yellow halos detected. Bird\'s Eye Spot (Helminthosporium heveae) is triggered by rain and humid conditions during refoliation.',
-        what_to_do: [
-            'Apply copper oxychloride or mancozeb during the early leaf flush stage.',
-            'Collect and destroy fallen infected leaves to reduce spore load.',
-            'Avoid overhead irrigation that prolongs leaf wetness.',
-        ],
-        prevention_tips: [
-            { title: 'Leaf Flush Timing', desc: 'Monitor closely during the refoliation period when leaves are most vulnerable.' },
-            { title: 'Canopy Airflow', desc: 'Prune to open the canopy and reduce humidity around foliage.' },
-        ],
-        recommended_fungicide: 'Copper Oxychloride 50WP',
-        water_mix_ratio: '20L Water Mix',
-        default_day_plan: 14,
-        follow_up_days: 14,
+        name: 'Bird Eye Spot', risk_level: 'Medium',
+        description: 'Small circular lesions with dark brown centres and yellow halos. Triggered by rain and humid conditions during refoliation.',
+        what_to_do: ['Apply copper oxychloride or mancozeb during early leaf flush.', 'Collect and destroy fallen infected leaves.', 'Avoid overhead irrigation that prolongs leaf wetness.'],
+        prevention_tips: [{ title: 'Leaf Flush Timing', desc: 'Monitor closely during refoliation when leaves are most vulnerable.' }, { title: 'Canopy Airflow', desc: 'Prune to open the canopy and reduce humidity.' }],
+        recommended_fungicide: 'Copper Oxychloride 50WP', water_mix_ratio: '20L Water Mix', default_day_plan: 14, follow_up_days: 14,
     },
     Colletotrichum: {
-        name: 'Colletotrichum (Anthracnose)',
-        risk_level: 'Low',
-        description: 'Small anthracnose lesions observed on young leaves. Colletotrichum infection is common during wet refoliation periods but manageable with timely treatment.',
-        what_to_do: [
-            'Spray with carbendazim or thiophanate-methyl during refoliation.',
-            'Collect and burn fallen infected leaves.',
-        ],
-        prevention_tips: [
-            { title: 'Timing', desc: 'Schedule fungicide application before the refoliation flush.' },
-            { title: 'Spacing', desc: 'Maintain open canopy to reduce moisture retention.' },
-        ],
-        recommended_fungicide: 'Carbendazim 50WP',
-        water_mix_ratio: '10L Water Mix',
-        default_day_plan: 7,
-        follow_up_days: 7,
+        name: 'Colletotrichum (Anthracnose)', risk_level: 'Low',
+        description: 'Small anthracnose lesions on young leaves. Common during wet refoliation periods but manageable with timely treatment.',
+        what_to_do: ['Spray with carbendazim or thiophanate-methyl during refoliation.', 'Collect and burn fallen infected leaves.', 'Monitor new flushes closely during wet season.'],
+        prevention_tips: [{ title: 'Timing', desc: 'Schedule fungicide before the refoliation flush.' }, { title: 'Spacing', desc: 'Maintain open canopy to reduce moisture retention.' }],
+        recommended_fungicide: 'Carbendazim 50WP', water_mix_ratio: '10L Water Mix', default_day_plan: 7, follow_up_days: 7,
     },
     Corynespora: {
-        name: 'Corynespora Leaf Fall',
-        risk_level: 'High',
-        description: 'Distinctive "fish-bone" necrotic lesions detected along the midrib. Corynespora cassiicola causes premature leaf drop and can severely reduce latex yield if left untreated.',
-        what_to_do: [
-            'Apply tebuconazole or propiconazole systemic fungicide immediately.',
-            'Remove and destroy heavily infected leaves before treatment begins.',
-            'Isolate affected rows and monitor neighbouring trees weekly.',
-        ],
-        prevention_tips: [
-            { title: 'Clone Selection', desc: 'Favour Corynespora-resistant clones when replanting.' },
-            { title: 'Early Scouting', desc: 'Inspect trees weekly during wet seasons for early detection.' },
-        ],
-        recommended_fungicide: 'Tebuconazole 25WG',
-        water_mix_ratio: '20L Water Mix',
-        default_day_plan: 21,
-        follow_up_days: 21,
+        name: 'Corynespora Leaf Fall', risk_level: 'High',
+        description: 'Distinctive fish-bone necrotic lesions along the midrib. Causes premature leaf drop and can severely reduce latex yield.',
+        what_to_do: ['Apply tebuconazole or propiconazole systemic fungicide immediately.', 'Remove and destroy heavily infected leaves.', 'Isolate affected rows and monitor weekly.'],
+        prevention_tips: [{ title: 'Clone Selection', desc: 'Favour Corynespora-resistant clones when replanting.' }, { title: 'Early Scouting', desc: 'Inspect trees weekly during wet seasons.' }],
+        recommended_fungicide: 'Tebuconazole 25WG', water_mix_ratio: '20L Water Mix', default_day_plan: 21, follow_up_days: 21,
     },
     Healthy: {
-        name: 'Healthy',
-        risk_level: 'Low',
-        description: 'No signs of disease detected. The leaf appears healthy with no visible lesions, discolouration, or abnormal growth patterns.',
-        what_to_do: [
-            'Continue regular monitoring on a weekly basis.',
-            'Maintain current fertilisation and irrigation schedule.',
-        ],
-        prevention_tips: [
-            { title: 'Routine Scouting', desc: 'Scout your estate weekly to catch early signs of infection.' },
-            { title: 'Balanced Nutrition', desc: 'Ensure adequate potassium and magnesium to maintain leaf health.' },
-        ],
-        recommended_fungicide: 'None required',
-        water_mix_ratio: 'N/A',
-        default_day_plan: 7,
-        follow_up_days: 30,
+        name: 'Healthy', risk_level: 'Low',
+        description: 'No signs of disease detected. The leaf appears healthy with no visible lesions or discolouration.',
+        what_to_do: ['Continue regular monitoring on a weekly basis.', 'Maintain current fertilisation and irrigation schedule.', 'Scout neighbouring trees for early infection signs.'],
+        prevention_tips: [{ title: 'Routine Scouting', desc: 'Scout your estate weekly to catch early signs of infection.' }, { title: 'Balanced Nutrition', desc: 'Ensure adequate potassium and magnesium for leaf health.' }],
+        recommended_fungicide: 'None required', water_mix_ratio: 'N/A', default_day_plan: 7, follow_up_days: 30,
     },
     Leaf_Blight: {
-        name: 'Fusicoccum Leaf Blight',
-        risk_level: 'High',
-        description: 'Dark water-soaked lesions found on leaves and young shoots. Leaf blight thrives in wet conditions and spreads rapidly through rain splash and wind.',
-        what_to_do: [
-            'Apply phosphonate-based systemic fungicide to all affected trees.',
-            'Remove and destroy fallen leaves from the base of trees.',
-            'Avoid working in affected areas during rainy weather.',
-        ],
-        prevention_tips: [
-            { title: 'Drainage', desc: 'Ensure water does not pool at the base of trees.' },
-            { title: 'Ground Cover', desc: 'Use mulch to prevent rain splash from infecting lower leaves.' },
-        ],
-        recommended_fungicide: 'Fosetyl-Al 80WP',
-        water_mix_ratio: '25L Water Mix',
-        default_day_plan: 21,
-        follow_up_days: 21,
+        name: 'Fusicoccum Leaf Blight', risk_level: 'High',
+        description: 'Dark water-soaked lesions on leaves and young shoots. Thrives in wet conditions and spreads rapidly through rain splash.',
+        what_to_do: ['Apply phosphonate-based systemic fungicide to all affected trees.', 'Remove and destroy fallen leaves from tree bases.', 'Avoid working in affected areas during rain.'],
+        prevention_tips: [{ title: 'Drainage', desc: 'Ensure water does not pool at the base of trees.' }, { title: 'Ground Cover', desc: 'Use mulch to prevent rain splash onto lower leaves.' }],
+        recommended_fungicide: 'Fosetyl-Al 80WP', water_mix_ratio: '25L Water Mix', default_day_plan: 21, follow_up_days: 21,
     },
     Powdery_Mildew: {
-        name: 'Powdery Mildew (Oidium)',
-        risk_level: 'Medium',
-        description: 'White powdery coating detected on leaf surfaces. Likely Oidium heveae affecting the upper canopy. Early intervention can prevent yield loss.',
-        what_to_do: [
-            'Apply wettable sulfur or trifloxystrobin fungicide immediately.',
-            'Avoid overhead irrigation to reduce leaf surface moisture.',
-            'Remove heavily affected leaves before treatment.',
-        ],
-        prevention_tips: [
-            { title: 'Humidity Control', desc: 'Improve ventilation to reduce canopy humidity.' },
-            { title: 'Monitoring', desc: 'Scout weekly during high-humidity periods.' },
-        ],
-        recommended_fungicide: 'Sulfur 80WP',
-        water_mix_ratio: '15L Water Mix',
-        default_day_plan: 10,
-        follow_up_days: 10,
+        name: 'Powdery Mildew (Oidium)', risk_level: 'Medium',
+        description: 'White powdery coating on leaf surfaces. Likely Oidium heveae affecting the upper canopy. Early intervention prevents yield loss.',
+        what_to_do: ['Apply wettable sulfur or trifloxystrobin fungicide immediately.', 'Avoid overhead irrigation to reduce leaf surface moisture.', 'Remove heavily affected leaves before treatment.'],
+        prevention_tips: [{ title: 'Humidity Control', desc: 'Improve ventilation to reduce canopy humidity.' }, { title: 'Monitoring', desc: 'Scout weekly during high-humidity periods.' }],
+        recommended_fungicide: 'Sulfur 80WP', water_mix_ratio: '15L Water Mix', default_day_plan: 10, follow_up_days: 10,
     },
 };
 
-// ── Backend URL — update to match your server address ────────────────────────
-// Android emulator: http://10.0.2.2:8000  |  Physical device: http://<your-pc-ip>:8000
-const BACKEND_URL = 'http://10.145.51.87:8000';
+// ── Backend URL ───────────────────────────────────────────────────────────────
+const BACKEND_URL = 'http://172.17.92.193:8000';
 
 export default function AnalysisPage() {
     const { imageUri } = useLocalSearchParams<{ imageUri: string }>();
     const { setCurrentScan, saveToHistory } = useScan();
 
-    const [mockResult, setMockResult] = useState<ScanResult>({
-        ...DEFAULT_SCAN,
-        id: `scan-${Date.now()}`,
-    });
+    const [mockResult, setMockResult] = useState<ScanResult | null>(null);
+    const [modelClass, setModelClass] = useState<string>('');
     const [predicting, setPredicting] = useState(true);
+    const [ragLoading, setRagLoading] = useState(false);
     const [predictError, setPredictError] = useState<string | null>(null);
     const [notALeaf, setNotALeaf] = useState(false);
     const [allProbabilities, setAllProbabilities] = useState<{ label: string; prob: number }[]>([]);
+    const [convertingPlan, setConvertingPlan] = useState(false);
     const [saving, setSaving] = useState(false);
 
-    // Returns true when model output is too uncertain to trust
     const isUnreliable = (probs: Record<string, number>, topConf: number): boolean => {
-        if (topConf < 0.60) return true; // low confidence threshold
-        // Shannon entropy check: max entropy for 6 classes = ln(6) ≈ 1.792
+        if (topConf < 0.60) return true;
         const entropy = -Object.values(probs).reduce((sum, p) => sum + (p > 0 ? p * Math.log(p) : 0), 0);
         const maxEntropy = Math.log(Object.keys(probs).length);
-        return entropy / maxEntropy > 0.80; // spread too evenly across classes
+        return entropy / maxEntropy > 0.80;
     };
 
+    const buildScanResult = (data: StaticEntry, confidencePct: number): ScanResult => ({
+        id: `scan-${Date.now()}`,
+        diseaseName: data.name,
+        confidence: confidencePct,
+        risk: data.risk_level,
+        description: data.description,
+        whatToDo: data.what_to_do,
+        preventionTips: data.prevention_tips,
+        fungicide: data.recommended_fungicide,
+        waterMix: data.water_mix_ratio,
+        dayPlan: data.default_day_plan,
+        followUpDays: data.follow_up_days,
+        treatmentSteps: buildFallbackSteps(data.default_day_plan),
+        imageUri: imageUri || undefined,
+        scanDate: new Date().toLocaleDateString('en-MY', { day: 'numeric', month: 'short', year: 'numeric' }),
+        location: '',
+    });
+
     useEffect(() => {
-        if (!imageUri) {
-            setPredicting(false);
-            return;
-        }
+        if (!imageUri) { setPredicting(false); return; }
         (async () => {
             try {
+                // ── Phase A: TFLite prediction ────────────────────────────
                 const formData = new FormData();
-                formData.append('file', {
-                    uri: imageUri,
-                    name: 'leaf.jpg',
-                    type: 'image/jpeg',
-                } as any);
+                formData.append('file', { uri: imageUri, name: 'leaf.jpg', type: 'image/jpeg' } as any);
 
-                const res = await fetch(`${BACKEND_URL}/predict`, {
-                    method: 'POST',
-                    body: formData,
-                });
-                if (!res.ok) {
-                    const err = await res.text();
-                    throw new Error(err);
-                }
+                const res = await fetch(`${BACKEND_URL}/predict`, { method: 'POST', body: formData });
+                if (!res.ok) throw new Error(await res.text());
+
                 const json: { disease: string; confidence: number; all_probabilities: Record<string, number> } = await res.json();
 
                 const ranked = Object.entries(json.all_probabilities)
-                    .map(([cls, prob]) => ({ label: DISEASE_DATA[cls]?.name ?? cls.replace(/_/g, ' '), prob }))
+                    .map(([cls, prob]) => ({ label: STATIC_FALLBACK[cls]?.name ?? cls.replace(/_/g, ' '), prob }))
                     .sort((a, b) => b.prob - a.prob);
                 setAllProbabilities(ranked);
 
@@ -221,32 +159,47 @@ export default function AnalysisPage() {
                     return;
                 }
 
-                const diseaseData = DISEASE_DATA[json.disease] ?? DISEASE_DATA['Healthy'];
+                const cls = json.disease;
+                const staticData = STATIC_FALLBACK[cls] ?? STATIC_FALLBACK['Healthy'];
                 const confidencePct = Math.round(json.confidence * 100);
-                const steps = buildSteps(diseaseData.default_day_plan);
 
-                setMockResult({
-                    id: `scan-${Date.now()}`,
-                    diseaseName: diseaseData.name,
-                    confidence: confidencePct,
-                    risk: diseaseData.risk_level,
-                    description: diseaseData.description,
-                    whatToDo: diseaseData.what_to_do,
-                    preventionTips: diseaseData.prevention_tips,
-                    fungicide: diseaseData.recommended_fungicide,
-                    waterMix: diseaseData.water_mix_ratio,
-                    dayPlan: diseaseData.default_day_plan,
-                    followUpDays: diseaseData.follow_up_days,
-                    treatmentSteps: steps,
-                    imageUri: imageUri || undefined,
-                    scanDate: new Date().toLocaleDateString('en-MY', {
-                        day: 'numeric', month: 'short', year: 'numeric',
-                    }),
-                    location: '',
-                });
+                setModelClass(cls);
+                setMockResult(buildScanResult(staticData, confidencePct));
+                setPredicting(false);
+
+                // ── Phase B: RAG enrichment (background, non-blocking) ────
+                if (cls === 'Healthy') return;
+                setRagLoading(true);
+                try {
+                    const ragRes = await fetch(`${BACKEND_URL}/disease-info`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ disease_class: cls }),
+                    });
+                    if (ragRes.ok) {
+                        const rag = await ragRes.json();
+                        setMockResult(prev => prev ? {
+                            ...prev,
+                            diseaseName: rag.disease_name ?? prev.diseaseName,
+                            risk: rag.risk_level ?? prev.risk,
+                            description: rag.description ?? prev.description,
+                            whatToDo: rag.what_to_do ?? prev.whatToDo,
+                            preventionTips: rag.prevention_tips ?? prev.preventionTips,
+                            fungicide: rag.recommended_fungicide ?? prev.fungicide,
+                            waterMix: rag.water_mix_ratio ?? prev.waterMix,
+                            dayPlan: rag.estimated_recovery_days ?? prev.dayPlan,
+                            followUpDays: rag.follow_up_days ?? prev.followUpDays,
+                        } : prev);
+                        // Update probability bar labels if disease name changed
+                        setAllProbabilities(prev => prev.map(item =>
+                            item.label === staticData.name ? { ...item, label: rag.disease_name ?? item.label } : item
+                        ));
+                    }
+                } catch { /* silently keep static fallback */ } finally {
+                    setRagLoading(false);
+                }
             } catch (e: any) {
                 setPredictError(e?.message ?? 'Prediction failed');
-            } finally {
                 setPredicting(false);
             }
         })();
@@ -290,23 +243,53 @@ export default function AnalysisPage() {
         }
     };
 
-    // Final scan result (merged with GPS)
-    const scanResult: ScanResult = {
+    // Final scan result (merged with GPS) — only valid after predicting is done
+    const scanResult: ScanResult = mockResult ? {
         ...mockResult,
         imageUri: imageUri || undefined,
         scanLat,
         scanLng,
         scanAddress,
-        // Use user-typed label if provided, else fall back to GPS address, else default
         location: locationLabel.trim() || scanAddress || 'Unknown Plot',
-    };
+    } : {} as ScanResult;
 
-    const handleConvertPlan = () => {
-        setCurrentScan(scanResult);
-        router.push('/pages/treatment');
+    const handleConvertPlan = async () => {
+        if (!mockResult) return;
+        setConvertingPlan(true);
+        try {
+            let steps: TreatmentStep[] = buildFallbackSteps(mockResult.dayPlan);
+            let expertTip: string | undefined;
+
+            if (modelClass && modelClass !== 'Healthy') {
+                try {
+                    const res = await fetch(`${BACKEND_URL}/generate-milestones`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ disease_class: modelClass, recovery_days: Math.round(mockResult.dayPlan) }),
+                    });
+                    if (res.ok) {
+                        const data = await res.json();
+                        steps = (data.steps as any[]).map((s, i) => ({
+                            id: i + 1,
+                            title: s.title,
+                            desc: s.description,
+                            status: (i === 0 ? 'current' : 'upcoming') as 'current' | 'upcoming',
+                            date: formatDateOffset(s.day_offset ?? 0),
+                        }));
+                        expertTip = data.expert_tip;
+                    }
+                } catch { /* use fallback steps */ }
+            }
+
+            setCurrentScan({ ...scanResult, treatmentSteps: steps, expertTip });
+            router.push('/pages/treatment');
+        } finally {
+            setConvertingPlan(false);
+        }
     };
 
     const handleSaveReport = async () => {
+        if (!mockResult) return;
         setSaving(true);
         try {
             // ── Step 1: Check auth session ────────────────────────────────
@@ -349,9 +332,9 @@ export default function AnalysisPage() {
 
             // ── Step 3: Build recommendation_json (matches DB schema) ─────
             const recommendationJson = {
-                what_to_do_next: result.whatToDo,
-                keep_your_farm_safe: result.preventionTips,
-                follow_up_action: `Scan these trees again in ${result.followUpDays} days to monitor healing progress.`,
+                what_to_do_next: scanResult.whatToDo,
+                keep_your_farm_safe: scanResult.preventionTips,
+                follow_up_action: `Scan these trees again in ${scanResult.followUpDays} days to monitor healing progress.`,
             };
 
             // ── Step 4: Insert scan ───────────────────────────────────────
@@ -359,14 +342,13 @@ export default function AnalysisPage() {
                 .from('scans')
                 .insert({
                     tree_id: treeId,
-                    disease_name: result.diseaseName,
-                    disease_description: result.description,
+                    disease_name: scanResult.diseaseName,
+                    disease_description: scanResult.description,
                     image_url: imageUri || null,
                     recommendation_json: recommendationJson,
-                    confidence_score: result.confidence,
-                    // DB enum is lowercase: 'low' | 'medium' | 'high'
-                    risk_level: result.risk.toLowerCase() as 'low' | 'medium' | 'high',
-                    follow_up_days: result.followUpDays,
+                    confidence_score: scanResult.confidence,
+                    risk_level: scanResult.risk.toLowerCase() as 'low' | 'medium' | 'high',
+                    follow_up_days: scanResult.followUpDays,
                     model_version: 'best_float32-tflite-v1',
                     status: 'converted_to_plan',
                 })
@@ -376,43 +358,38 @@ export default function AnalysisPage() {
             console.log('[save] scan inserted:', scan.id);
 
             // ── Step 5: Create treatment plan ─────────────────────────────
+            const expertTipText = scanResult.expertTip
+                ?? `Apply ${scanResult.fungicide} (${scanResult.waterMix}) and re-scan in ${scanResult.followUpDays} days.`;
+
             const { data: plan, error: planErr } = await supabase
                 .from('treatment_plans')
                 .insert({
                     scan_id: scan.id,
                     tree_id: treeId,
-                    title: `${result.diseaseName} Treatment`,
-                    disease_name: result.diseaseName,
-                    estimated_recovery_days: result.dayPlan,
+                    title: `${scanResult.diseaseName} Treatment`,
+                    disease_name: scanResult.diseaseName,
+                    estimated_recovery_days: scanResult.dayPlan,
                     overall_progress: 0,
                     status: 'active',
-                    expert_tip: `Apply ${result.fungicide} (${result.waterMix}) and re-scan in ${result.followUpDays} days.`,
+                    expert_tip: expertTipText,
                 })
                 .select('id')
                 .single();
             if (planErr || !plan) throw new Error(planErr?.message ?? 'Plan insert failed');
             console.log('[save] plan inserted:', plan.id);
 
-            // ── Step 6: Insert 4 treatment steps ──────────────────────────
-            const addDaysISO = (d: number) =>
-                new Date(Date.now() + d * 864e5).toISOString();
+            // ── Step 6: Insert treatment steps from AI-generated plan ─────
+            const stepStatusMap: Record<string, string> = { current: 'ongoing', upcoming: 'upcoming', completed: 'completed' };
+            const stepsToInsert = scanResult.treatmentSteps.map((step, i) => ({
+                treatment_plan_id: plan.id,
+                step_order: i + 1,
+                title: step.title,
+                description: step.desc,
+                status: stepStatusMap[step.status] ?? 'upcoming',
+                due_date: new Date(Date.now() + i * Math.floor(scanResult.dayPlan / 3) * 864e5).toISOString(),
+            }));
 
-            const { error: stepsErr } = await supabase
-                .from('treatment_plan_steps')
-                .insert([
-                    { treatment_plan_id: plan.id, step_order: 1, title: 'Initial Application',
-                      description: 'Apply first fungicide spray at full dose.',
-                      status: 'ongoing',  due_date: addDaysISO(0) },
-                    { treatment_plan_id: plan.id, step_order: 2, title: 'Secondary Spray',
-                      description: 'Follow-up spray. Check leaf coverage.',
-                      status: 'upcoming', due_date: addDaysISO(Math.floor(result.dayPlan * 0.3)) },
-                    { treatment_plan_id: plan.id, step_order: 3, title: 'Observation Period',
-                      description: 'Monitor leaf recovery and note progress.',
-                      status: 'upcoming', due_date: addDaysISO(Math.floor(result.dayPlan * 0.6)) },
-                    { treatment_plan_id: plan.id, step_order: 4, title: 'Final Assessment',
-                      description: 'Final check — verify tree health status.',
-                      status: 'locked',   due_date: addDaysISO(result.dayPlan) },
-                ]);
+            const { error: stepsErr } = await supabase.from('treatment_plan_steps').insert(stepsToInsert);
             if (stepsErr) throw new Error(stepsErr?.message ?? 'Steps insert failed');
             console.log('[save] steps inserted');
 
@@ -422,7 +399,7 @@ export default function AnalysisPage() {
 
             Alert.alert(
                 '✅ Report Saved',
-                `Scan saved to database!\n\nDisease: ${result.diseaseName}\nTree: ${treeLabel}`,
+                `Scan saved to database!\n\nDisease: ${scanResult.diseaseName}\nTree: ${treeLabel}`,
                 [
                     {
                         text: 'View Milestones',
@@ -442,8 +419,6 @@ export default function AnalysisPage() {
             setSaving(false);
         }
     };
-
-    const result = scanResult;
 
     if (predicting) {
         return (
@@ -570,7 +545,7 @@ export default function AnalysisPage() {
 
                 <View style={styles.dangerBadge}>
                     <Ionicons name="warning" size={14} color={COLORS.dangerText} />
-                    <Text style={styles.dangerBadgeText}>{result.diseaseName} Found</Text>
+                    <Text style={styles.dangerBadgeText}>{scanResult.diseaseName} Found</Text>
                 </View>
 
                 {/* Section 1: What disease is this? */}
@@ -581,7 +556,7 @@ export default function AnalysisPage() {
                         </View>
                         <Text style={styles.cardTitle}>What disease is this?</Text>
                     </View>
-                    <Text style={styles.cardText}>{result.description}</Text>
+                    <Text style={styles.cardText}>{scanResult.description}</Text>
                     <Image
                         source={imageUri ? { uri: imageUri } : require('@/assets/images/leaf.jpeg')}
                         style={styles.leafImage}
@@ -620,6 +595,14 @@ export default function AnalysisPage() {
                     </View>
                 )}
 
+                {/* RAG loading banner */}
+                {ragLoading && (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#f0fdf4', borderRadius: 14, padding: 14, marginBottom: 16 }}>
+                        <ActivityIndicator size="small" color={COLORS.primary} />
+                        <Text style={{ fontSize: 13, color: COLORS.primary, fontWeight: '600' }}>Fetching AI analysis from knowledge base...</Text>
+                    </View>
+                )}
+
                 {/* Section 2: What to do next */}
                 <View style={styles.card}>
                     <View style={styles.cardHeader}>
@@ -629,7 +612,7 @@ export default function AnalysisPage() {
                         <Text style={styles.cardTitle}>What to do next</Text>
                     </View>
 
-                    {result.whatToDo.map((step, idx) => (
+                    {scanResult.whatToDo.map((step, idx) => (
                         <View key={idx} style={styles.stepItem}>
                             <View style={styles.stepCircle}>
                                 <Text style={styles.stepNumber}>{idx + 1}</Text>
@@ -649,7 +632,7 @@ export default function AnalysisPage() {
                     </View>
 
                     <View style={styles.gridRow}>
-                        {result.preventionTips.map((tip, idx) => (
+                        {scanResult.preventionTips.map((tip, idx) => (
                             <View key={idx} style={styles.gridItem}>
                                 <MaterialCommunityIcons
                                     name={idx === 0 ? 'water-outline' : 'map-marker-radius'}
@@ -671,7 +654,7 @@ export default function AnalysisPage() {
                         <Text style={styles.followUpTitle}>FOLLOW-UP ACTION</Text>
                     </View>
                     <Text style={styles.followUpText}>
-                        Scan these specific trees again in {result.followUpDays} days to monitor healing progress.
+                        Scan these specific trees again in {scanResult.followUpDays} days to monitor healing progress.
                     </Text>
                 </View>
 
@@ -768,28 +751,30 @@ export default function AnalysisPage() {
                 <View style={styles.confidenceRow}>
                     <View style={styles.confidenceItem}>
                         <Text style={styles.confidenceLabel}>Confidence</Text>
-                        <Text style={styles.confidenceValue}>{result.confidence}%</Text>
+                        <Text style={styles.confidenceValue}>{scanResult.confidence}%</Text>
                     </View>
                     <View style={styles.confidenceDivider} />
                     <View style={styles.confidenceItem}>
                         <Text style={styles.confidenceLabel}>Risk Level</Text>
-                        <Text style={[styles.confidenceValue, { color: result.risk === 'High' ? '#c62828' : result.risk === 'Medium' ? '#f59e0b' : '#2eb86a' }]}>
-                            {result.risk}
+                        <Text style={[styles.confidenceValue, { color: scanResult.risk === 'High' ? '#c62828' : scanResult.risk === 'Medium' ? '#f59e0b' : '#2eb86a' }]}>
+                            {scanResult.risk}
                         </Text>
                     </View>
                     <View style={styles.confidenceDivider} />
                     <View style={styles.confidenceItem}>
                         <Text style={styles.confidenceLabel}>Treatment</Text>
-                        <Text style={styles.confidenceValue}>{result.dayPlan} Days</Text>
+                        <Text style={styles.confidenceValue}>{scanResult.dayPlan} Days</Text>
                     </View>
                 </View>
 
                 <View style={{ height: 16 }} />
 
                 {/* Action Buttons */}
-                <TouchableOpacity style={styles.primaryBtn} onPress={handleConvertPlan} activeOpacity={0.9}>
-                    <MaterialCommunityIcons name="playlist-edit" size={24} color="#fff" />
-                    <Text style={styles.primaryBtnText}>Convert to Milestone Plan</Text>
+                <TouchableOpacity style={[styles.primaryBtn, convertingPlan && { opacity: 0.75 }]} onPress={handleConvertPlan} activeOpacity={0.9} disabled={convertingPlan}>
+                    {convertingPlan
+                        ? <ActivityIndicator size="small" color="#fff" />
+                        : <MaterialCommunityIcons name="playlist-edit" size={24} color="#fff" />}
+                    <Text style={styles.primaryBtnText}>{convertingPlan ? 'Generating Plan...' : 'Convert to Milestone Plan'}</Text>
                 </TouchableOpacity>
 
                 <View style={styles.secondaryBtnRow}>

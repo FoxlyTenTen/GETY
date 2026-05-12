@@ -8,6 +8,12 @@ import { useScan, TreatmentStep } from '@/context/ScanContext';
 
 export default function TreatmentPage() {
     const { currentScan } = useScan();
+
+    if (!currentScan) {
+        router.replace('/');
+        return null;
+    }
+
     const { diseaseName, treatmentSteps, dayPlan } = currentScan;
 
     const completedCount = treatmentSteps.filter(s => s.status === 'completed').length;
@@ -131,7 +137,7 @@ export default function TreatmentPage() {
                     <View style={styles.tipContent}>
                         <Text style={styles.tipTitle}>Expert Tip</Text>
                         <Text style={styles.tipText}>
-                            Ensure proper tree spacing during recovery to maximize airflow and reduce moisture retention.
+                            {currentScan.expertTip ?? 'Ensure proper tree spacing during recovery to maximise airflow and reduce moisture retention.'}
                         </Text>
                     </View>
                 </View>
