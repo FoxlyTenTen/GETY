@@ -7,6 +7,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as Location from 'expo-location';
 import { useScan, ScanResult, TreatmentStep } from '@/context/ScanContext';
 import { supabase } from '@/lib/supabase';
+import { useLanguage } from '@/context/LanguageContext';
 
 const COLORS = {
     primary: '#1e5b43',
@@ -44,61 +45,108 @@ function buildFallbackSteps(dayPlan: number): TreatmentStep[] {
 type StaticEntry = {
     name: string; risk_level: 'Low' | 'Medium' | 'High';
     description: string; what_to_do: string[];
-    prevention_tips: { title: string; desc: string }[];
+    fungicide_tips: { title: string; desc: string }[];
     recommended_fungicide: string; water_mix_ratio: string;
     default_day_plan: number; follow_up_days: number;
 };
 const STATIC_FALLBACK: Record<string, StaticEntry> = {
     Bird_Eye_Spot: {
         name: 'Bird Eye Spot', risk_level: 'Medium',
-        description: 'Small circular lesions with dark brown centres and yellow halos. Triggered by rain and humid conditions during refoliation.',
+        description: 'Small circular lesions with dark brown centres and yellow halos. Caused by Bipolaris heveae during humid refoliation periods.',
         what_to_do: ['Apply copper oxychloride or mancozeb during early leaf flush.', 'Collect and destroy fallen infected leaves.', 'Avoid overhead irrigation that prolongs leaf wetness.'],
-        prevention_tips: [{ title: 'Leaf Flush Timing', desc: 'Monitor closely during refoliation when leaves are most vulnerable.' }, { title: 'Canopy Airflow', desc: 'Prune to open the canopy and reduce humidity.' }],
-        recommended_fungicide: 'Copper Oxychloride 50WP', water_mix_ratio: '20L Water Mix', default_day_plan: 14, follow_up_days: 14,
+        fungicide_tips: [{ title: 'Fungicide & Dosage', desc: 'Mancozeb 80WP at 0.2% (2g/L water) or Copper Oxychloride 50WP at 0.3%.' }, { title: 'Spray Schedule', desc: 'Spray every 10–14 days during refoliation flush until new leaves mature.' }],
+        recommended_fungicide: 'Mancozeb 80WP', water_mix_ratio: '0.2% (2g/L)', default_day_plan: 14, follow_up_days: 14,
     },
     Colletotrichum: {
         name: 'Colletotrichum (Anthracnose)', risk_level: 'Low',
-        description: 'Small anthracnose lesions on young leaves. Common during wet refoliation periods but manageable with timely treatment.',
+        description: 'Anthracnose lesions on young leaves caused by Colletotrichum gloeosporioides. Common during wet refoliation periods.',
         what_to_do: ['Spray with carbendazim or thiophanate-methyl during refoliation.', 'Collect and burn fallen infected leaves.', 'Monitor new flushes closely during wet season.'],
-        prevention_tips: [{ title: 'Timing', desc: 'Schedule fungicide before the refoliation flush.' }, { title: 'Spacing', desc: 'Maintain open canopy to reduce moisture retention.' }],
-        recommended_fungicide: 'Carbendazim 50WP', water_mix_ratio: '10L Water Mix', default_day_plan: 7, follow_up_days: 7,
+        fungicide_tips: [{ title: 'Fungicide & Dosage', desc: 'Carbendazim 50WP at 0.1% (1g/L water) or Chlorothalonil 75WP at 0.2%.' }, { title: 'Spray Schedule', desc: 'Apply at first sign of leaf flush, repeat every 7–10 days for 2–3 applications.' }],
+        recommended_fungicide: 'Carbendazim 50WP', water_mix_ratio: '0.1% (1g/L)', default_day_plan: 7, follow_up_days: 7,
     },
     Corynespora: {
         name: 'Corynespora Leaf Fall', risk_level: 'High',
-        description: 'Distinctive fish-bone necrotic lesions along the midrib. Causes premature leaf drop and can severely reduce latex yield.',
+        description: 'Fish-bone necrotic lesions along the midrib caused by Corynespora cassiicola. Causes severe premature leaf drop.',
         what_to_do: ['Apply tebuconazole or propiconazole systemic fungicide immediately.', 'Remove and destroy heavily infected leaves.', 'Isolate affected rows and monitor weekly.'],
-        prevention_tips: [{ title: 'Clone Selection', desc: 'Favour Corynespora-resistant clones when replanting.' }, { title: 'Early Scouting', desc: 'Inspect trees weekly during wet seasons.' }],
-        recommended_fungicide: 'Tebuconazole 25WG', water_mix_ratio: '20L Water Mix', default_day_plan: 21, follow_up_days: 21,
+        fungicide_tips: [{ title: 'Fungicide & Dosage', desc: 'Tebuconazole 25WG at 0.1% (1g/L) or Benomyl 50WP at 0.1% (1g/L water).' }, { title: 'Spray Schedule', desc: 'Apply every 10–14 days for 3 rounds, then reassess leaf recovery.' }],
+        recommended_fungicide: 'Tebuconazole 25WG', water_mix_ratio: '0.1% (1g/L)', default_day_plan: 21, follow_up_days: 21,
     },
     Healthy: {
         name: 'Healthy', risk_level: 'Low',
         description: 'No signs of disease detected. The leaf appears healthy with no visible lesions or discolouration.',
         what_to_do: ['Continue regular monitoring on a weekly basis.', 'Maintain current fertilisation and irrigation schedule.', 'Scout neighbouring trees for early infection signs.'],
-        prevention_tips: [{ title: 'Routine Scouting', desc: 'Scout your estate weekly to catch early signs of infection.' }, { title: 'Balanced Nutrition', desc: 'Ensure adequate potassium and magnesium for leaf health.' }],
+        fungicide_tips: [{ title: 'Preventive Spray', desc: 'Consider preventive fungicide at start of refoliation season as a precaution.' }, { title: 'Routine Scouting', desc: 'Scout estate weekly during wet seasons to catch early infections.' }],
         recommended_fungicide: 'None required', water_mix_ratio: 'N/A', default_day_plan: 7, follow_up_days: 30,
     },
     Leaf_Blight: {
         name: 'Fusicoccum Leaf Blight', risk_level: 'High',
-        description: 'Dark water-soaked lesions on leaves and young shoots. Thrives in wet conditions and spreads rapidly through rain splash.',
-        what_to_do: ['Apply phosphonate-based systemic fungicide to all affected trees.', 'Remove and destroy fallen leaves from tree bases.', 'Avoid working in affected areas during rain.'],
-        prevention_tips: [{ title: 'Drainage', desc: 'Ensure water does not pool at the base of trees.' }, { title: 'Ground Cover', desc: 'Use mulch to prevent rain splash onto lower leaves.' }],
-        recommended_fungicide: 'Fosetyl-Al 80WP', water_mix_ratio: '25L Water Mix', default_day_plan: 21, follow_up_days: 21,
+        description: 'Dark water-soaked lesions on leaves and young shoots caused by Fusicoccum. Spreads rapidly in wet conditions.',
+        what_to_do: ['Apply carbendazim or propiconazole systemic fungicide to all affected trees.', 'Remove and destroy fallen leaves from tree bases.', 'Avoid working in affected areas during rain.'],
+        fungicide_tips: [{ title: 'Fungicide & Dosage', desc: 'Carbendazim 50WP at 0.1% (1g/L) or Propiconazole 25EC at 0.1% (1ml/L water).' }, { title: 'Spray Schedule', desc: 'Spray every 10–14 days during active infection. Minimum 3 applications.' }],
+        recommended_fungicide: 'Carbendazim 50WP', water_mix_ratio: '0.1% (1g/L)', default_day_plan: 21, follow_up_days: 21,
     },
     Powdery_Mildew: {
         name: 'Powdery Mildew (Oidium)', risk_level: 'Medium',
-        description: 'White powdery coating on leaf surfaces. Likely Oidium heveae affecting the upper canopy. Early intervention prevents yield loss.',
-        what_to_do: ['Apply wettable sulfur or trifloxystrobin fungicide immediately.', 'Avoid overhead irrigation to reduce leaf surface moisture.', 'Remove heavily affected leaves before treatment.'],
-        prevention_tips: [{ title: 'Humidity Control', desc: 'Improve ventilation to reduce canopy humidity.' }, { title: 'Monitoring', desc: 'Scout weekly during high-humidity periods.' }],
-        recommended_fungicide: 'Sulfur 80WP', water_mix_ratio: '15L Water Mix', default_day_plan: 10, follow_up_days: 10,
+        description: 'White powdery coating on leaf surfaces caused by Oidium heveae. Affects upper canopy during dry periods.',
+        what_to_do: ['Apply wettable sulphur or tridemorph fungicide immediately.', 'Spray early morning when humidity is lower.', 'Remove heavily affected leaves before treatment.'],
+        fungicide_tips: [{ title: 'Fungicide & Dosage', desc: 'Sulphur 80WP at 0.3% (3g/L water) or Tridemorph 750EC at 0.1% (1ml/L).' }, { title: 'Spray Schedule', desc: 'Apply every 7–10 days during leaf flush. Stop when new leaves have fully hardened.' }],
+        recommended_fungicide: 'Sulphur 80WP', water_mix_ratio: '0.3% (3g/L)', default_day_plan: 10, follow_up_days: 10,
+    },
+};
+
+const STATIC_FALLBACK_MS: Record<string, StaticEntry> = {
+    Bird_Eye_Spot: {
+        name: 'Bird Eye Spot', risk_level: 'Medium',
+        description: 'Luka bulat kecil dengan pusat coklat gelap dan lingkaran kuning. Disebabkan oleh Bipolaris heveae semasa tempoh penggantian daun yang lembap.',
+        what_to_do: ['Gunakan kuprum oksikorida atau mankozeb semasa pelepasan daun awal.', 'Kumpul dan musnahkan daun jangkitan yang gugur.', 'Elakkan pengairan dari atas yang memanjangkan kelembapan daun.'],
+        fungicide_tips: [{ title: 'Fungisid & Dos', desc: 'Mancozeb 80WP pada 0.2% (2g/L air) atau Kuprum Oksikorida 50WP pada 0.3%.' }, { title: 'Jadual Semburan', desc: 'Sembur setiap 10–14 hari semasa pelepasan penggantian daun sehingga daun baru matang.' }],
+        recommended_fungicide: 'Mancozeb 80WP', water_mix_ratio: '0.2% (2g/L)', default_day_plan: 14, follow_up_days: 14,
+    },
+    Colletotrichum: {
+        name: 'Colletotrichum (Antraknos)', risk_level: 'Low',
+        description: 'Luka antraknos pada daun muda disebabkan oleh Colletotrichum gloeosporioides. Biasa semasa tempoh penggantian daun yang basah.',
+        what_to_do: ['Sembur dengan karbendazim atau thiophanat-metil semasa penggantian daun.', 'Kumpul dan bakar daun jangkitan yang gugur.', 'Pantau pelepasan baru dengan rapi semasa musim hujan.'],
+        fungicide_tips: [{ title: 'Fungisid & Dos', desc: 'Karbendazim 50WP pada 0.1% (1g/L air) atau Klorotalonil 75WP pada 0.2%.' }, { title: 'Jadual Semburan', desc: 'Gunakan pada tanda pertama pelepasan daun, ulang setiap 7–10 hari untuk 2–3 aplikasi.' }],
+        recommended_fungicide: 'Karbendazim 50WP', water_mix_ratio: '0.1% (1g/L)', default_day_plan: 7, follow_up_days: 7,
+    },
+    Corynespora: {
+        name: 'Luruhan Daun Corynespora', risk_level: 'High',
+        description: 'Luka nekrotik tulang ikan di sepanjang urat tengah disebabkan oleh Corynespora cassiicola. Menyebabkan gugur daun pramatang yang teruk.',
+        what_to_do: ['Gunakan fungisid sistemik tebukonazol atau propikonazol dengan segera.', 'Buang dan musnahkan daun yang dijangkiti teruk.', 'Asingkan baris yang terjejas dan pantau setiap minggu.'],
+        fungicide_tips: [{ title: 'Fungisid & Dos', desc: 'Tebukonazol 25WG pada 0.1% (1g/L) atau Benomil 50WP pada 0.1% (1g/L air).' }, { title: 'Jadual Semburan', desc: 'Gunakan setiap 10–14 hari untuk 3 pusingan, kemudian nilai semula pemulihan daun.' }],
+        recommended_fungicide: 'Tebukonazol 25WG', water_mix_ratio: '0.1% (1g/L)', default_day_plan: 21, follow_up_days: 21,
+    },
+    Healthy: {
+        name: 'Sihat', risk_level: 'Low',
+        description: 'Tiada tanda-tanda penyakit dikesan. Daun kelihatan sihat tanpa luka atau perubahan warna yang ketara.',
+        what_to_do: ['Teruskan pemantauan berkala setiap minggu.', 'Kekalkan jadual baja dan pengairan semasa.', 'Pantau pokok berjiran untuk tanda jangkitan awal.'],
+        fungicide_tips: [{ title: 'Semburan Pencegahan', desc: 'Pertimbangkan fungisid pencegahan pada permulaan musim penggantian daun sebagai langkah berjaga-jaga.' }, { title: 'Pengintipan Rutin', desc: 'Pantau ladang setiap minggu semasa musim hujan untuk mengesan jangkitan awal.' }],
+        recommended_fungicide: 'Tidak diperlukan', water_mix_ratio: 'T/B', default_day_plan: 7, follow_up_days: 30,
+    },
+    Leaf_Blight: {
+        name: 'Keradangan Daun Fusicoccum', risk_level: 'High',
+        description: 'Luka gelap berair pada daun dan pucuk muda disebabkan oleh Fusicoccum. Merebak dengan cepat dalam keadaan basah.',
+        what_to_do: ['Gunakan fungisid sistemik karbendazim atau propikonazol pada semua pokok yang terjejas.', 'Buang dan musnahkan daun gugur dari pangkal pokok.', 'Elakkan bekerja di kawasan yang terjejas semasa hujan.'],
+        fungicide_tips: [{ title: 'Fungisid & Dos', desc: 'Karbendazim 50WP pada 0.1% (1g/L) atau Propikonazol 25EC pada 0.1% (1ml/L air).' }, { title: 'Jadual Semburan', desc: 'Sembur setiap 10–14 hari semasa jangkitan aktif. Minimum 3 aplikasi.' }],
+        recommended_fungicide: 'Karbendazim 50WP', water_mix_ratio: '0.1% (1g/L)', default_day_plan: 21, follow_up_days: 21,
+    },
+    Powdery_Mildew: {
+        name: 'Embun Tepung (Oidium)', risk_level: 'Medium',
+        description: 'Lapisan tepung putih pada permukaan daun disebabkan oleh Oidium heveae. Menjejaskan kanopi atas semasa tempoh kering.',
+        what_to_do: ['Gunakan fungisid sulfur basah atau tridemorph dengan segera.', 'Sembur pada waktu awal pagi apabila kelembapan lebih rendah.', 'Buang daun yang terjejas teruk sebelum rawatan.'],
+        fungicide_tips: [{ title: 'Fungisid & Dos', desc: 'Sulfur 80WP pada 0.3% (3g/L air) atau Tridemorph 750EC pada 0.1% (1ml/L).' }, { title: 'Jadual Semburan', desc: 'Gunakan setiap 7–10 hari semasa pelepasan daun. Berhenti apabila daun baru telah mengeras sepenuhnya.' }],
+        recommended_fungicide: 'Sulfur 80WP', water_mix_ratio: '0.3% (3g/L)', default_day_plan: 10, follow_up_days: 10,
     },
 };
 
 // ── Backend URL ───────────────────────────────────────────────────────────────
-const BACKEND_URL = 'http://172.17.92.193:8000';
+const BACKEND_URL = process.env.EXPO_PUBLIC_RAG_BACKEND_URL ?? 'http://localhost:8000';
 
 export default function AnalysisPage() {
     const { imageUri } = useLocalSearchParams<{ imageUri: string }>();
     const { setCurrentScan, saveToHistory } = useScan();
+    const { language, t } = useLanguage();
+    const fallback = language === 'ms' ? STATIC_FALLBACK_MS : STATIC_FALLBACK;
 
     const [mockResult, setMockResult] = useState<ScanResult | null>(null);
     const [modelClass, setModelClass] = useState<string>('');
@@ -109,6 +157,7 @@ export default function AnalysisPage() {
     const [allProbabilities, setAllProbabilities] = useState<{ label: string; prob: number }[]>([]);
     const [convertingPlan, setConvertingPlan] = useState(false);
     const [saving, setSaving] = useState(false);
+    const [milestoneCache, setMilestoneCache] = useState<{ steps: TreatmentStep[]; expertTip?: string } | null>(null);
 
     const isUnreliable = (probs: Record<string, number>, topConf: number): boolean => {
         if (topConf < 0.60) return true;
@@ -124,7 +173,7 @@ export default function AnalysisPage() {
         risk: data.risk_level,
         description: data.description,
         whatToDo: data.what_to_do,
-        preventionTips: data.prevention_tips,
+        fungicideTips: data.fungicide_tips,
         fungicide: data.recommended_fungicide,
         waterMix: data.water_mix_ratio,
         dayPlan: data.default_day_plan,
@@ -149,7 +198,7 @@ export default function AnalysisPage() {
                 const json: { disease: string; confidence: number; all_probabilities: Record<string, number> } = await res.json();
 
                 const ranked = Object.entries(json.all_probabilities)
-                    .map(([cls, prob]) => ({ label: STATIC_FALLBACK[cls]?.name ?? cls.replace(/_/g, ' '), prob }))
+                    .map(([cls, prob]) => ({ label: fallback[cls]?.name ?? cls.replace(/_/g, ' '), prob }))
                     .sort((a, b) => b.prob - a.prob);
                 setAllProbabilities(ranked);
 
@@ -160,7 +209,7 @@ export default function AnalysisPage() {
                 }
 
                 const cls = json.disease;
-                const staticData = STATIC_FALLBACK[cls] ?? STATIC_FALLBACK['Healthy'];
+                const staticData = fallback[cls] ?? fallback['Healthy'];
                 const confidencePct = Math.round(json.confidence * 100);
 
                 setModelClass(cls);
@@ -174,7 +223,7 @@ export default function AnalysisPage() {
                     const ragRes = await fetch(`${BACKEND_URL}/disease-info`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ disease_class: cls }),
+                        body: JSON.stringify({ disease_class: cls, language }),
                     });
                     if (ragRes.ok) {
                         const rag = await ragRes.json();
@@ -184,7 +233,7 @@ export default function AnalysisPage() {
                             risk: rag.risk_level ?? prev.risk,
                             description: rag.description ?? prev.description,
                             whatToDo: rag.what_to_do ?? prev.whatToDo,
-                            preventionTips: rag.prevention_tips ?? prev.preventionTips,
+                            fungicideTips: rag.fungicide_tips ?? prev.fungicideTips,
                             fungicide: rag.recommended_fungicide ?? prev.fungicide,
                             waterMix: rag.water_mix_ratio ?? prev.waterMix,
                             dayPlan: rag.estimated_recovery_days ?? prev.dayPlan,
@@ -192,7 +241,8 @@ export default function AnalysisPage() {
                         } : prev);
                         // Update probability bar labels if disease name changed
                         setAllProbabilities(prev => prev.map(item =>
-                            item.label === staticData.name ? { ...item, label: rag.disease_name ?? item.label } : item
+                            item.label === staticData.name || item.label === STATIC_FALLBACK[cls]?.name
+                                ? { ...item, label: rag.disease_name ?? item.label } : item
                         ));
                     }
                 } catch { /* silently keep static fallback */ } finally {
@@ -255,6 +305,14 @@ export default function AnalysisPage() {
 
     const handleConvertPlan = async () => {
         if (!mockResult) return;
+
+        // Use cached result if already generated
+        if (milestoneCache) {
+            setCurrentScan({ ...scanResult, treatmentSteps: milestoneCache.steps, expertTip: milestoneCache.expertTip });
+            router.push('/pages/treatment');
+            return;
+        }
+
         setConvertingPlan(true);
         try {
             let steps: TreatmentStep[] = buildFallbackSteps(mockResult.dayPlan);
@@ -265,7 +323,7 @@ export default function AnalysisPage() {
                     const res = await fetch(`${BACKEND_URL}/generate-milestones`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ disease_class: modelClass, recovery_days: Math.round(mockResult.dayPlan) }),
+                        body: JSON.stringify({ disease_class: modelClass, recovery_days: Math.round(mockResult.dayPlan), language }),
                     });
                     if (res.ok) {
                         const data = await res.json();
@@ -275,12 +333,14 @@ export default function AnalysisPage() {
                             desc: s.description,
                             status: (i === 0 ? 'current' : 'upcoming') as 'current' | 'upcoming',
                             date: formatDateOffset(s.day_offset ?? 0),
+                            dayOffset: s.day_offset ?? 0,
                         }));
                         expertTip = data.expert_tip;
                     }
                 } catch { /* use fallback steps */ }
             }
 
+            setMilestoneCache({ steps, expertTip });
             setCurrentScan({ ...scanResult, treatmentSteps: steps, expertTip });
             router.push('/pages/treatment');
         } finally {
@@ -295,7 +355,7 @@ export default function AnalysisPage() {
             // ── Step 1: Check auth session ────────────────────────────────
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) {
-                Alert.alert('Not Signed In', 'Please sign in to save a report.');
+                Alert.alert(t.notSignedIn, t.pleaseSignIn);
                 setSaving(false);
                 return;
             }
@@ -333,7 +393,7 @@ export default function AnalysisPage() {
             // ── Step 3: Build recommendation_json (matches DB schema) ─────
             const recommendationJson = {
                 what_to_do_next: scanResult.whatToDo,
-                keep_your_farm_safe: scanResult.preventionTips,
+                keep_your_farm_safe: scanResult.fungicideTips,
                 follow_up_action: `Scan these trees again in ${scanResult.followUpDays} days to monitor healing progress.`,
             };
 
@@ -350,63 +410,73 @@ export default function AnalysisPage() {
                     risk_level: scanResult.risk.toLowerCase() as 'low' | 'medium' | 'high',
                     follow_up_days: scanResult.followUpDays,
                     model_version: 'best_float32-tflite-v1',
-                    status: 'converted_to_plan',
+                    status: modelClass === 'Healthy' ? 'new' : 'converted_to_plan',
                 })
                 .select('id')
                 .single();
             if (scanErr || !scan) throw new Error(scanErr?.message ?? 'Scan insert failed');
             console.log('[save] scan inserted:', scan.id);
 
-            // ── Step 5: Create treatment plan ─────────────────────────────
-            const expertTipText = scanResult.expertTip
-                ?? `Apply ${scanResult.fungicide} (${scanResult.waterMix}) and re-scan in ${scanResult.followUpDays} days.`;
+            // ── Steps 5 & 6: Treatment plan — skip entirely for Healthy scans ──
+            if (modelClass && modelClass !== 'Healthy') {
+                const stepsSource = milestoneCache?.steps ?? scanResult.treatmentSteps;
+                const expertTipText = milestoneCache?.expertTip
+                    ?? scanResult.expertTip
+                    ?? `Apply ${scanResult.fungicide} (${scanResult.waterMix}) and re-scan in ${scanResult.followUpDays} days.`;
 
-            const { data: plan, error: planErr } = await supabase
-                .from('treatment_plans')
-                .insert({
-                    scan_id: scan.id,
-                    tree_id: treeId,
-                    title: `${scanResult.diseaseName} Treatment`,
-                    disease_name: scanResult.diseaseName,
-                    estimated_recovery_days: scanResult.dayPlan,
-                    overall_progress: 0,
-                    status: 'active',
-                    expert_tip: expertTipText,
-                })
-                .select('id')
-                .single();
-            if (planErr || !plan) throw new Error(planErr?.message ?? 'Plan insert failed');
-            console.log('[save] plan inserted:', plan.id);
+                const { data: plan, error: planErr } = await supabase
+                    .from('treatment_plans')
+                    .insert({
+                        scan_id: scan.id,
+                        tree_id: treeId,
+                        title: `${scanResult.diseaseName} Treatment`,
+                        disease_name: scanResult.diseaseName,
+                        estimated_recovery_days: scanResult.dayPlan,
+                        overall_progress: 0,
+                        status: 'active',
+                        expert_tip: expertTipText,
+                        recommended_fungicide: scanResult.fungicide ?? null,
+                        water_mix_ratio: scanResult.waterMix ?? null,
+                    })
+                    .select('id')
+                    .single();
+                if (planErr || !plan) throw new Error(planErr?.message ?? 'Plan insert failed');
+                console.log('[save] plan inserted:', plan.id);
 
-            // ── Step 6: Insert treatment steps from AI-generated plan ─────
-            const stepStatusMap: Record<string, string> = { current: 'ongoing', upcoming: 'upcoming', completed: 'completed' };
-            const stepsToInsert = scanResult.treatmentSteps.map((step, i) => ({
-                treatment_plan_id: plan.id,
-                step_order: i + 1,
-                title: step.title,
-                description: step.desc,
-                status: stepStatusMap[step.status] ?? 'upcoming',
-                due_date: new Date(Date.now() + i * Math.floor(scanResult.dayPlan / 3) * 864e5).toISOString(),
-            }));
+                const stepStatusMap: Record<string, string> = { current: 'ongoing', upcoming: 'upcoming', completed: 'completed' };
+                const totalSteps = stepsSource.length;
+                const stepsToInsert = stepsSource.map((step, i) => {
+                    const offsetDays = step.dayOffset
+                        ?? Math.round(i * scanResult.dayPlan / Math.max(totalSteps - 1, 1));
+                    return {
+                        treatment_plan_id: plan.id,
+                        step_order: i + 1,
+                        title: step.title,
+                        description: step.desc,
+                        status: stepStatusMap[step.status] ?? 'upcoming',
+                        due_date: new Date(Date.now() + offsetDays * 864e5).toISOString(),
+                    };
+                });
 
-            const { error: stepsErr } = await supabase.from('treatment_plan_steps').insert(stepsToInsert);
-            if (stepsErr) throw new Error(stepsErr?.message ?? 'Steps insert failed');
-            console.log('[save] steps inserted');
+                const { error: stepsErr } = await supabase.from('treatment_plan_steps').insert(stepsToInsert);
+                if (stepsErr) throw new Error(stepsErr?.message ?? 'Steps insert failed');
+                console.log('[save] steps inserted');
+            }
 
             // ── Step 7: Save locally to ScanContext too ───────────────────
             setCurrentScan(scanResult);
             saveToHistory(scanResult);
 
             Alert.alert(
-                '✅ Report Saved',
-                `Scan saved to database!\n\nDisease: ${scanResult.diseaseName}\nTree: ${treeLabel}`,
+                t.reportSavedTitle,
+                t.reportSavedMsg(scanResult.diseaseName, treeLabel),
                 [
                     {
-                        text: 'View Milestones',
+                        text: t.viewMilestones,
                         onPress: () => router.replace('/(tabs)/milestone' as any),
                     },
                     {
-                        text: 'Go Home',
+                        text: t.goHome,
                         style: 'cancel',
                         onPress: () => router.replace('/' as any),
                     },
@@ -414,7 +484,7 @@ export default function AnalysisPage() {
             );
         } catch (e: any) {
             console.error('[save] error:', e?.message ?? e);
-            Alert.alert('Save Failed', `Error: ${e?.message ?? 'Unknown error'}\n\nCheck console for details.`);
+            Alert.alert(t.saveFailed, `Error: ${e?.message ?? 'Unknown error'}`);
         } finally {
             setSaving(false);
         }
@@ -424,7 +494,7 @@ export default function AnalysisPage() {
         return (
             <SafeAreaView style={[styles.safeArea, { alignItems: 'center', justifyContent: 'center', gap: 16 }]}>
                 <ActivityIndicator size="large" color={COLORS.primary} />
-                <Text style={{ color: COLORS.textMuted, fontSize: 15 }}>Analysing leaf image...</Text>
+                <Text style={{ color: COLORS.textMuted, fontSize: 15 }}>{t.analysingLeaf}</Text>
             </SafeAreaView>
         );
     }
@@ -440,10 +510,10 @@ export default function AnalysisPage() {
                         <Ionicons name="scan-outline" size={36} color="#b45309" />
                     </View>
                     <Text style={{ fontSize: 20, fontWeight: '800', color: '#1a1a1a', textAlign: 'center' }}>
-                        No Rubber Leaf Detected
+                        {t.noLeafTitle}
                     </Text>
                     <Text style={{ fontSize: 14, color: COLORS.textMuted, textAlign: 'center', lineHeight: 22 }}>
-                        The model could not confidently identify a rubber leaf in this image. This may happen if the image is blurry, too far away, or does not show a leaf.
+                        {t.noLeafDesc}
                     </Text>
                 </View>
 
@@ -451,7 +521,7 @@ export default function AnalysisPage() {
                 {allProbabilities.length > 0 && (
                     <View style={[styles.card, { marginBottom: 24 }]}>
                         <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.textMuted, marginBottom: 12 }}>
-                            MODEL OUTPUT (LOW CONFIDENCE)
+                            {t.modelOutputLabel}
                         </Text>
                         {allProbabilities.map((item, idx) => (
                             <View key={item.label} style={{ marginBottom: 8 }}>
@@ -472,13 +542,8 @@ export default function AnalysisPage() {
                 )}
 
                 <View style={{ gap: 12 }}>
-                    <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.textMain, marginBottom: 4 }}>Tips for a better scan:</Text>
-                    {[
-                        'Hold the camera 20–30 cm from the leaf',
-                        'Ensure the leaf fills most of the frame',
-                        'Scan in good natural lighting, avoid shadows',
-                        'Use a single leaf, not a cluster',
-                    ].map((tip, i) => (
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.textMain, marginBottom: 4 }}>{t.scanTipsTitle}</Text>
+                    {[t.scanTip1, t.scanTip2, t.scanTip3, t.scanTip4].map((tip, i) => (
                         <View key={i} style={{ flexDirection: 'row', gap: 10, alignItems: 'flex-start' }}>
                             <Ionicons name="checkmark-circle" size={16} color={COLORS.primary} style={{ marginTop: 2 }} />
                             <Text style={{ fontSize: 13, color: COLORS.textMain, flex: 1 }}>{tip}</Text>
@@ -492,7 +557,7 @@ export default function AnalysisPage() {
                     activeOpacity={0.9}
                 >
                     <Ionicons name="camera" size={20} color="#fff" />
-                    <Text style={styles.primaryBtnText}>Scan Again</Text>
+                    <Text style={styles.primaryBtnText}>{t.scanAgain}</Text>
                 </TouchableOpacity>
             </SafeAreaView>
         );
@@ -503,13 +568,13 @@ export default function AnalysisPage() {
             <SafeAreaView style={[styles.safeArea, { alignItems: 'center', justifyContent: 'center', padding: 32, gap: 16 }]}>
                 <Ionicons name="warning" size={40} color="#c62828" />
                 <Text style={{ color: '#c62828', fontSize: 16, fontWeight: '700', textAlign: 'center' }}>
-                    Could not analyse image
+                    {t.couldNotAnalyse}
                 </Text>
                 <Text style={{ color: COLORS.textMuted, fontSize: 13, textAlign: 'center' }}>
                     {predictError}
                 </Text>
                 <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 8 }}>
-                    <Text style={{ color: COLORS.primary, fontWeight: '700' }}>Go Back</Text>
+                    <Text style={{ color: COLORS.primary, fontWeight: '700' }}>{t.goBack}</Text>
                 </TouchableOpacity>
             </SafeAreaView>
         );
@@ -538,14 +603,14 @@ export default function AnalysisPage() {
                         <MaterialCommunityIcons name="robot" size={28} color="#fff" />
                     </View>
                     <View style={styles.topTextContent}>
-                        <Text style={styles.title}>Treatment Plan Prepared</Text>
-                        <Text style={styles.subtitle}>Our smart assistant has analyzed your rubber tree scan.</Text>
+                        <Text style={styles.title}>{t.treatmentPlanPrepared}</Text>
+                        <Text style={styles.subtitle}>{t.analysisSubtitle}</Text>
                     </View>
                 </View>
 
                 <View style={styles.dangerBadge}>
                     <Ionicons name="warning" size={14} color={COLORS.dangerText} />
-                    <Text style={styles.dangerBadgeText}>{scanResult.diseaseName} Found</Text>
+                    <Text style={styles.dangerBadgeText}>{t.foundBadge(scanResult.diseaseName)}</Text>
                 </View>
 
                 {/* Section 1: What disease is this? */}
@@ -554,9 +619,16 @@ export default function AnalysisPage() {
                         <View style={[styles.iconBox, { backgroundColor: COLORS.iconBgGreen }]}>
                             <Ionicons name="folder" size={16} color={COLORS.primary} />
                         </View>
-                        <Text style={styles.cardTitle}>What disease is this?</Text>
+                        <Text style={styles.cardTitle}>{t.whatDiseaseIs}</Text>
                     </View>
-                    <Text style={styles.cardText}>{scanResult.description}</Text>
+                    {ragLoading ? (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 }}>
+                            <ActivityIndicator size="small" color={COLORS.primary} />
+                            <Text style={{ fontSize: 13, color: '#6b7280' }}>{t.loadingDescription}</Text>
+                        </View>
+                    ) : (
+                        <Text style={styles.cardText}>{scanResult.description}</Text>
+                    )}
                     <Image
                         source={imageUri ? { uri: imageUri } : require('@/assets/images/leaf.jpeg')}
                         style={styles.leafImage}
@@ -571,7 +643,7 @@ export default function AnalysisPage() {
                             <View style={[styles.iconBox, { backgroundColor: '#e0f2fe' }]}>
                                 <Ionicons name="stats-chart" size={16} color="#0369a1" />
                             </View>
-                            <Text style={styles.cardTitle}>Detection Confidence</Text>
+                            <Text style={styles.cardTitle}>{t.detectionConfidence}</Text>
                         </View>
                         {allProbabilities.map((item, idx) => {
                             const pct = item.prob * 100;
@@ -595,68 +667,73 @@ export default function AnalysisPage() {
                     </View>
                 )}
 
-                {/* RAG loading banner */}
-                {ragLoading && (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#f0fdf4', borderRadius: 14, padding: 14, marginBottom: 16 }}>
-                        <ActivityIndicator size="small" color={COLORS.primary} />
-                        <Text style={{ fontSize: 13, color: COLORS.primary, fontWeight: '600' }}>Fetching AI analysis from knowledge base...</Text>
+                {/* Sections 2–4: show loading state while RAG is fetching */}
+                {ragLoading ? (
+                    <View style={{ backgroundColor: '#f0fdf4', borderRadius: 18, padding: 28, alignItems: 'center', gap: 14, marginBottom: 16 }}>
+                        <ActivityIndicator size="large" color={COLORS.primary} />
+                        <Text style={{ fontSize: 15, fontWeight: '700', color: COLORS.primary }}>{t.analysingWithAI}</Text>
+                        <Text style={{ fontSize: 13, color: '#4b7c5e', textAlign: 'center' }}>
+                            {t.analysingWithAIDesc}
+                        </Text>
                     </View>
+                ) : (
+                    <>
+                        {/* Section 2: What to do next */}
+                        <View style={styles.card}>
+                            <View style={styles.cardHeader}>
+                                <View style={[styles.iconBox, { backgroundColor: COLORS.iconBgOrange }]}>
+                                    <MaterialCommunityIcons name="clipboard-check" size={16} color={COLORS.orangeText} />
+                                </View>
+                                <Text style={styles.cardTitle}>{t.whatToDoNext}</Text>
+                            </View>
+
+                            {scanResult.whatToDo.map((step, idx) => (
+                                <View key={idx} style={styles.stepItem}>
+                                    <View style={styles.stepCircle}>
+                                        <Text style={styles.stepNumber}>{idx + 1}</Text>
+                                    </View>
+                                    <Text style={styles.stepText}>{step}</Text>
+                                </View>
+                            ))}
+                        </View>
+
+                        {/* Section 3: Fungicide Treatment Guide */}
+                        <View style={styles.grayCard}>
+                            <View style={styles.cardHeader}>
+                                <View style={[styles.iconBox, { backgroundColor: COLORS.iconBgOrange }]}>
+                                    <MaterialCommunityIcons name="flask-outline" size={18} color={COLORS.orangeText} />
+                                </View>
+                                <Text style={styles.cardTitle}>{t.fungicideGuide}</Text>
+                            </View>
+
+                            <View style={styles.gridRow}>
+                                {(scanResult.fungicideTips ?? []).map((tip, idx) => (
+                                    <View key={idx} style={styles.gridItem}>
+                                        <MaterialCommunityIcons
+                                            name={idx === 0 ? 'flask' : 'calendar-clock'}
+                                            size={22}
+                                            color={COLORS.primary}
+                                            style={{ marginBottom: 12 }}
+                                        />
+                                        <Text style={styles.gridTitle}>{tip.title}</Text>
+                                        <Text style={styles.gridDesc}>{tip.desc}</Text>
+                                    </View>
+                                ))}
+                            </View>
+                        </View>
+
+                        {/* Section 4: FOLLOW-UP ACTION */}
+                        <View style={styles.followUpCard}>
+                            <View style={styles.followUpHeader}>
+                                <MaterialCommunityIcons name="calendar-check" size={16} color={COLORS.primary} />
+                                <Text style={styles.followUpTitle}>{t.followUpAction}</Text>
+                            </View>
+                            <Text style={styles.followUpText}>
+                                {t.followUpText(scanResult.followUpDays)}
+                            </Text>
+                        </View>
+                    </>
                 )}
-
-                {/* Section 2: What to do next */}
-                <View style={styles.card}>
-                    <View style={styles.cardHeader}>
-                        <View style={[styles.iconBox, { backgroundColor: COLORS.iconBgOrange }]}>
-                            <MaterialCommunityIcons name="clipboard-check" size={16} color={COLORS.orangeText} />
-                        </View>
-                        <Text style={styles.cardTitle}>What to do next</Text>
-                    </View>
-
-                    {scanResult.whatToDo.map((step, idx) => (
-                        <View key={idx} style={styles.stepItem}>
-                            <View style={styles.stepCircle}>
-                                <Text style={styles.stepNumber}>{idx + 1}</Text>
-                            </View>
-                            <Text style={styles.stepText}>{step}</Text>
-                        </View>
-                    ))}
-                </View>
-
-                {/* Section 3: Keep your farm safe */}
-                <View style={styles.grayCard}>
-                    <View style={styles.cardHeader}>
-                        <View style={[styles.iconBox, { backgroundColor: COLORS.iconBgOrange }]}>
-                            <MaterialCommunityIcons name="shield-half-full" size={18} color={COLORS.orangeText} />
-                        </View>
-                        <Text style={styles.cardTitle}>Keep your farm safe</Text>
-                    </View>
-
-                    <View style={styles.gridRow}>
-                        {scanResult.preventionTips.map((tip, idx) => (
-                            <View key={idx} style={styles.gridItem}>
-                                <MaterialCommunityIcons
-                                    name={idx === 0 ? 'water-outline' : 'map-marker-radius'}
-                                    size={22}
-                                    color={COLORS.primary}
-                                    style={{ marginBottom: 12 }}
-                                />
-                                <Text style={styles.gridTitle}>{tip.title}</Text>
-                                <Text style={styles.gridDesc}>{tip.desc}</Text>
-                            </View>
-                        ))}
-                    </View>
-                </View>
-
-                {/* Section 4: FOLLOW-UP ACTION */}
-                <View style={styles.followUpCard}>
-                    <View style={styles.followUpHeader}>
-                        <MaterialCommunityIcons name="calendar-check" size={16} color={COLORS.primary} />
-                        <Text style={styles.followUpTitle}>FOLLOW-UP ACTION</Text>
-                    </View>
-                    <Text style={styles.followUpText}>
-                        Scan these specific trees again in {scanResult.followUpDays} days to monitor healing progress.
-                    </Text>
-                </View>
 
                 {/* ── GPS Location Tag ── */}
                 <View style={styles.gpsCard}>
@@ -665,8 +742,8 @@ export default function AnalysisPage() {
                             <Ionicons name="location" size={18} color={COLORS.primary} />
                         </View>
                         <View style={styles.gpsHeaderText}>
-                            <Text style={styles.gpsTitle}>Tree Location Tag</Text>
-                            <Text style={styles.gpsSubtitle}>Pin the exact GPS coordinates of this tree</Text>
+                            <Text style={styles.gpsTitle}>{t.treeLocationTag}</Text>
+                            <Text style={styles.gpsSubtitle}>{t.treeLocationSubtitle}</Text>
                         </View>
                     </View>
 
@@ -675,12 +752,12 @@ export default function AnalysisPage() {
                         <View style={styles.gpsCaptured}>
                             <View style={styles.gpsCoordRow}>
                                 <View style={styles.gpsCoordItem}>
-                                    <Text style={styles.gpsCoordLabel}>LATITUDE</Text>
+                                    <Text style={styles.gpsCoordLabel}>{t.latitude}</Text>
                                     <Text style={styles.gpsCoordValue}>{scanLat.toFixed(6)}</Text>
                                 </View>
                                 <View style={styles.gpsCoordDivider} />
                                 <View style={styles.gpsCoordItem}>
-                                    <Text style={styles.gpsCoordLabel}>LONGITUDE</Text>
+                                    <Text style={styles.gpsCoordLabel}>{t.longitude}</Text>
                                     <Text style={styles.gpsCoordValue}>{scanLng.toFixed(6)}</Text>
                                 </View>
                             </View>
@@ -696,7 +773,7 @@ export default function AnalysisPage() {
                                 activeOpacity={0.7}
                             >
                                 <Ionicons name="refresh" size={14} color={COLORS.primary} />
-                                <Text style={styles.gpsRetapText}>Re-capture location</Text>
+                                <Text style={styles.gpsRetapText}>{t.recaptureLocation}</Text>
                             </TouchableOpacity>
                         </View>
                     ) : (
@@ -713,7 +790,7 @@ export default function AnalysisPage() {
                                 <Ionicons name="locate" size={20} color="#fff" />
                             )}
                             <Text style={styles.gpsCaptureBtnText}>
-                                {gpsLoading ? 'Getting location...' : 'Tap to Tag GPS Location'}
+                                {gpsLoading ? t.gettingLocation : t.tapToTagGPS}
                             </Text>
                         </TouchableOpacity>
                     )}
@@ -726,13 +803,13 @@ export default function AnalysisPage() {
                             <Ionicons name="pricetag" size={16} color={COLORS.primary} />
                         </View>
                         <View>
-                            <Text style={styles.gpsTitle}>Plot / Tree Label</Text>
-                            <Text style={styles.gpsSubtitle}>Enter a name to identify this tree or plot</Text>
+                            <Text style={styles.gpsTitle}>{t.plotLabel}</Text>
+                            <Text style={styles.gpsSubtitle}>{t.plotLabelSubtitle}</Text>
                         </View>
                     </View>
                     <TextInput
                         style={styles.labelInput}
-                        placeholder="e.g. North Plot B-12, Plot A Section 3..."
+                        placeholder={t.plotPlaceholder}
                         placeholderTextColor="#9ca3af"
                         value={locationLabel}
                         onChangeText={setLocationLabel}
@@ -742,7 +819,7 @@ export default function AnalysisPage() {
                     {locationLabel.trim().length > 0 && (
                         <View style={styles.labelPreview}>
                             <Ionicons name="checkmark-circle" size={14} color="#2eb86a" />
-                            <Text style={styles.labelPreviewText}>Will be saved as: "{locationLabel.trim()}"</Text>
+                            <Text style={styles.labelPreviewText}>{t.willBeSavedAs(locationLabel.trim())}</Text>
                         </View>
                     )}
                 </View>
@@ -750,43 +827,45 @@ export default function AnalysisPage() {
                 {/* Confidence Row */}
                 <View style={styles.confidenceRow}>
                     <View style={styles.confidenceItem}>
-                        <Text style={styles.confidenceLabel}>Confidence</Text>
+                        <Text style={styles.confidenceLabel}>{t.confidenceLabel}</Text>
                         <Text style={styles.confidenceValue}>{scanResult.confidence}%</Text>
                     </View>
                     <View style={styles.confidenceDivider} />
                     <View style={styles.confidenceItem}>
-                        <Text style={styles.confidenceLabel}>Risk Level</Text>
+                        <Text style={styles.confidenceLabel}>{t.riskLevel}</Text>
                         <Text style={[styles.confidenceValue, { color: scanResult.risk === 'High' ? '#c62828' : scanResult.risk === 'Medium' ? '#f59e0b' : '#2eb86a' }]}>
                             {scanResult.risk}
                         </Text>
                     </View>
                     <View style={styles.confidenceDivider} />
                     <View style={styles.confidenceItem}>
-                        <Text style={styles.confidenceLabel}>Treatment</Text>
-                        <Text style={styles.confidenceValue}>{scanResult.dayPlan} Days</Text>
+                        <Text style={styles.confidenceLabel}>{t.treatment}</Text>
+                        <Text style={styles.confidenceValue}>{t.days(scanResult.dayPlan)}</Text>
                     </View>
                 </View>
 
                 <View style={{ height: 16 }} />
 
                 {/* Action Buttons */}
-                <TouchableOpacity style={[styles.primaryBtn, convertingPlan && { opacity: 0.75 }]} onPress={handleConvertPlan} activeOpacity={0.9} disabled={convertingPlan}>
-                    {convertingPlan
-                        ? <ActivityIndicator size="small" color="#fff" />
-                        : <MaterialCommunityIcons name="playlist-edit" size={24} color="#fff" />}
-                    <Text style={styles.primaryBtnText}>{convertingPlan ? 'Generating Plan...' : 'Convert to Milestone Plan'}</Text>
-                </TouchableOpacity>
+                {modelClass !== 'Healthy' && (
+                    <TouchableOpacity style={[styles.primaryBtn, convertingPlan && { opacity: 0.75 }]} onPress={handleConvertPlan} activeOpacity={0.9} disabled={convertingPlan}>
+                        {convertingPlan
+                            ? <ActivityIndicator size="small" color="#fff" />
+                            : <MaterialCommunityIcons name="playlist-edit" size={24} color="#fff" />}
+                        <Text style={styles.primaryBtnText}>{convertingPlan ? t.generatingPlan : t.convertToMilestone}</Text>
+                    </TouchableOpacity>
+                )}
 
                 <View style={styles.secondaryBtnRow}>
                     <TouchableOpacity style={[styles.secondaryBtn, { backgroundColor: COLORS.iconBgOrange }]} onPress={handleSaveReport} activeOpacity={0.8} disabled={saving}>
                         <MaterialCommunityIcons name="bookmark" size={18} color={COLORS.orangeText} />
                         <Text style={[styles.secondaryBtnText, { color: COLORS.orangeText }]}>
-                            {saving ? 'Saving...' : 'Save Report'}
+                            {saving ? t.saving : t.saveReport}
                         </Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={[styles.secondaryBtn, { backgroundColor: '#e5e7eb' }]} activeOpacity={0.8}>
                         <MaterialCommunityIcons name="chat-processing" size={18} color={COLORS.textMain} />
-                        <Text style={[styles.secondaryBtnText, { color: COLORS.textMain }]}>Ask AI</Text>
+                        <Text style={[styles.secondaryBtnText, { color: COLORS.textMain }]}>{t.askAI}</Text>
                     </TouchableOpacity>
                 </View>
 

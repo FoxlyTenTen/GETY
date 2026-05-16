@@ -11,6 +11,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import AppHeader from '@/components/common/AppHeader';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/context/AuthContext';
+import { useLanguage } from '@/context/LanguageContext';
 
 const { width } = Dimensions.get('window');
 
@@ -49,6 +50,7 @@ function formatDue(iso: string | null) {
 
 export default function Index() {
     const { isAdmin } = useAuth();
+    const { t } = useLanguage();
     const [data, setData]           = useState<HomeData | null>(null);
     const [loading, setLoading]     = useState(true);
     const [alertDismissed, setAlertDismissed] = useState(false);
@@ -153,7 +155,7 @@ export default function Index() {
                 <AppHeader title="GETY" />
                 <View style={styles.loadingCenter}>
                     <ActivityIndicator size="large" color="#1e5b43" />
-                    <Text style={styles.loadingText}>Loading dashboard...</Text>
+                    <Text style={styles.loadingText}>{t.loadingDashboard}</Text>
                 </View>
             </SafeAreaView>
         );
@@ -175,10 +177,10 @@ export default function Index() {
 
     // Greeting based on time of day
     const hour = new Date().getHours();
-    const greeting = hour < 12 ? 'Good Morning' : hour < 17 ? 'Good Afternoon' : 'Good Evening';
+    const greeting = hour < 12 ? t.goodMorning : hour < 17 ? t.goodAfternoon : t.goodEvening;
     const subText = totalScans > 0
-        ? `You have ${totalScans} scan record${totalScans > 1 ? 's' : ''} in the system.`
-        : 'Start scanning to track your estate health.';
+        ? (totalScans === 1 ? t.scanRecordsSingle(totalScans) : t.scanRecordsPlural(totalScans))
+        : t.startScanning;
 
     return (
         <SafeAreaView style={styles.container}>
@@ -200,9 +202,9 @@ export default function Index() {
                         <View style={styles.alertLeft}>
                             <Ionicons name="warning" size={16} color="#c62828" style={{ marginTop: 1 }} />
                             <View style={styles.alertText}>
-                                <Text style={styles.alertTitle}>Action Required</Text>
+                                <Text style={styles.alertTitle}>{t.actionRequired}</Text>
                                 <Text style={styles.alertBody}>
-                                    {highRiskScan.disease_name} detected at {highRiskScan.tree_label}. Review scan records immediately.
+                                    {t.detectedAt(highRiskScan.disease_name, highRiskScan.tree_label)}
                                 </Text>
                             </View>
                         </View>
@@ -215,14 +217,14 @@ export default function Index() {
                 {/* ── Recent Diagnosis Card ── */}
                 <View style={styles.diagnosisCard}>
                     <View style={styles.diagnosisLeft}>
-                        <Text style={styles.diagnosisLabel}>Recent Diagnosis</Text>
+                        <Text style={styles.diagnosisLabel}>{t.recentDiagnosis}</Text>
                         <Text style={styles.diagnosisName}>
-                            {latestScan ? latestScan.disease_name : 'No scans yet'}
+                            {latestScan ? latestScan.disease_name : t.noScansYet}
                         </Text>
                         <Text style={styles.diagnosisTime}>
                             {latestScan
-                                ? `Scanned on ${formatDate(latestScan.scanned_at)} · ${latestScan.tree_label}`
-                                : 'Start scanning to see results'}
+                                ? t.scannedOn(formatDate(latestScan.scanned_at), latestScan.tree_label)
+                                : t.startScanningResults}
                         </Text>
                     </View>
                     <View style={[
@@ -251,15 +253,15 @@ export default function Index() {
                     <View style={styles.statCard}>
                         <View style={styles.statIconRow}>
                             <MaterialCommunityIcons name="calendar-check" size={18} color="#235e45" />
-                            <Text style={styles.statCategory}>MILESTONE</Text>
+                            <Text style={styles.statCategory}>{t.milestone}</Text>
                         </View>
                         <Text style={styles.statMain} numberOfLines={2}>
-                            {currentStep ? currentStep.title : 'No active task'}
+                            {currentStep ? currentStep.title : t.noActiveTask}
                         </Text>
                         <Text style={styles.statSub}>
                             {currentStep?.due_date
-                                ? `Due ${formatDue(currentStep.due_date)}`
-                                : 'All steps up to date'}
+                                ? t.due(formatDue(currentStep.due_date) ?? '')
+                                : t.allStepsUpToDate}
                         </Text>
                     </View>
 
@@ -267,15 +269,15 @@ export default function Index() {
                     <View style={styles.statCard}>
                         <View style={styles.statIconRow}>
                             <MaterialCommunityIcons name="chart-bar" size={18} color="#235e45" />
-                            <Text style={styles.statCategory}>RECORDS</Text>
+                            <Text style={styles.statCategory}>{t.records}</Text>
                         </View>
                         <Text style={[styles.statMain, { fontSize: 36 }]}>{totalScans}</Text>
-                        <Text style={styles.statSub}>Total past scans</Text>
+                        <Text style={styles.statSub}>{t.totalPastScans}</Text>
                     </View>
                 </View>
 
                 {/* ── Quick Actions ── */}
-                <Text style={styles.sectionTitle}>Quick Actions</Text>
+                <Text style={styles.sectionTitle}>{t.quickActions}</Text>
 
                 {/* Primary CTA */}
                 <TouchableOpacity
@@ -284,7 +286,7 @@ export default function Index() {
                     onPress={() => router.push('/pages/scanpage')}
                 >
                     <Ionicons name="camera" size={22} color="#fff" />
-                    <Text style={styles.captureBtnText}>Capture Image</Text>
+                    <Text style={styles.captureBtnText}>{t.captureImage}</Text>
                 </TouchableOpacity>
 
                 {/* 2×2 Action Grid */}
@@ -293,7 +295,7 @@ export default function Index() {
                         <View style={styles.actionIconBox}>
                             <MaterialCommunityIcons name="file-image-outline" size={24} color="#374151" />
                         </View>
-                        <Text style={styles.actionLabel}>Upload Image</Text>
+                        <Text style={styles.actionLabel}>{t.uploadImage}</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity
@@ -304,7 +306,7 @@ export default function Index() {
                         <View style={styles.actionIconBox}>
                             <MaterialCommunityIcons name="robot-outline" size={24} color="#374151" />
                         </View>
-                        <Text style={styles.actionLabel}>AI Assistant</Text>
+                        <Text style={styles.actionLabel}>{t.aiAssistant}</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity
@@ -315,7 +317,7 @@ export default function Index() {
                         <View style={styles.actionIconBox}>
                             <MaterialCommunityIcons name="history" size={24} color="#374151" />
                         </View>
-                        <Text style={styles.actionLabel}>History</Text>
+                        <Text style={styles.actionLabel}>{t.historyLabel}</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity
@@ -326,7 +328,7 @@ export default function Index() {
                         <View style={styles.actionIconBox}>
                             <MaterialCommunityIcons name="flag-checkered" size={24} color="#374151" />
                         </View>
-                        <Text style={styles.actionLabel}>Milestones</Text>
+                        <Text style={styles.actionLabel}>{t.milestonesLabel}</Text>
                     </TouchableOpacity>
                 </View>
 
@@ -338,7 +340,7 @@ export default function Index() {
                         onPress={() => router.push('/admin/knowledge-base-upload')}
                     >
                         <Ionicons name="cloud-upload-outline" size={20} color="#1e5b43" />
-                        <Text style={styles.adminBtnText}>Knowledge Base</Text>
+                        <Text style={styles.adminBtnText}>{t.knowledgeBase}</Text>
                         <Ionicons name="chevron-forward" size={18} color="#9ca3af" />
                     </TouchableOpacity>
                 )}

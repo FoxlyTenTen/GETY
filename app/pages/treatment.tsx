@@ -5,9 +5,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useScan, TreatmentStep } from '@/context/ScanContext';
+import { useLanguage } from '@/context/LanguageContext';
 
 export default function TreatmentPage() {
     const { currentScan } = useScan();
+    const { t } = useLanguage();
 
     if (!currentScan) {
         router.replace('/');
@@ -28,7 +30,7 @@ export default function TreatmentPage() {
                 <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
                     <Ionicons name="arrow-back" size={24} color="#064e3b" />
                 </TouchableOpacity>
-                <Text style={styles.headerTitle}>Treatment Plan</Text>
+                <Text style={styles.headerTitle}>{t.treatmentPlan}</Text>
                 <View style={{ width: 34 }} />
             </View>
 
@@ -37,23 +39,23 @@ export default function TreatmentPage() {
                 {/* Sub-Header Section */}
                 <View style={styles.subHeader}>
                     <View style={styles.activeBadge}>
-                        <Text style={styles.activeText}>ACTIVE TREATMENT</Text>
+                        <Text style={styles.activeText}>{t.activeTreatment}</Text>
                     </View>
                     <Text style={styles.diseaseName}>{diseaseName}</Text>
                 </View>
 
-                <Text style={styles.mainTitle}>Revive Your Estate's Canopy</Text>
+                <Text style={styles.mainTitle}>{t.reviveCanopy}</Text>
 
                 {/* Progress Card */}
                 <View style={styles.progressCard}>
                     <View style={styles.progressTop}>
                         <View>
-                            <Text style={styles.progressLabel}>CURRENT PROGRESS</Text>
+                            <Text style={styles.progressLabel}>{t.currentProgress}</Text>
                             <Text style={styles.progressPercent}>{progressPct}%</Text>
                         </View>
                         <View style={styles.estRecovery}>
                             <MaterialCommunityIcons name="cog" size={24} color="#f3f4f6" style={styles.cogIcon} />
-                            <Text style={styles.estLabel}>EST. RECOVERY</Text>
+                            <Text style={styles.estLabel}>{t.estRecovery}</Text>
                             <Text style={styles.estDays}>{dayPlan} Days</Text>
                         </View>
                     </View>
@@ -64,7 +66,7 @@ export default function TreatmentPage() {
 
                 {/* Roadmap Header */}
                 <View style={styles.roadmapHeader}>
-                    <Text style={styles.roadmapTitle}>Milestone Roadmap</Text>
+                    <Text style={styles.roadmapTitle}>{t.milestoneRoadmap}</Text>
                     <MaterialCommunityIcons name="bandage" size={20} color="#235e45" />
                 </View>
 
@@ -98,13 +100,10 @@ export default function TreatmentPage() {
                                         <View style={styles.cardHeader}>
                                             <Text style={styles.milestoneTitle}>{step.title}</Text>
                                             <View style={styles.statusBadgeOngoing}>
-                                                <Text style={styles.statusTextOngoing}>ONGOING</Text>
+                                                <Text style={styles.statusTextOngoing}>{t.ongoing}</Text>
                                             </View>
                                         </View>
                                         <Text style={styles.milestoneDesc}>{step.desc}</Text>
-                                        <TouchableOpacity style={styles.updateBtn}>
-                                            <Text style={styles.updateBtnText}>Update Progress</Text>
-                                        </TouchableOpacity>
                                     </View>
                                 </View>
                             );
@@ -118,7 +117,7 @@ export default function TreatmentPage() {
                                         <View style={styles.cardHeader}>
                                             <Text style={styles.upcomingTitle}>{step.title}</Text>
                                             <View style={styles.statusBadgeUpcoming}>
-                                                <Text style={styles.statusTextUpcoming}>UPCOMING</Text>
+                                                <Text style={styles.statusTextUpcoming}>{t.upcoming}</Text>
                                             </View>
                                         </View>
                                         <Text style={styles.upcomingDesc}>{step.desc}</Text>
@@ -135,9 +134,9 @@ export default function TreatmentPage() {
                         <MaterialCommunityIcons name="lightbulb" size={24} color="#4b3621" />
                     </View>
                     <View style={styles.tipContent}>
-                        <Text style={styles.tipTitle}>Expert Tip</Text>
+                        <Text style={styles.tipTitle}>{t.expertTip}</Text>
                         <Text style={styles.tipText}>
-                            {currentScan.expertTip ?? 'Ensure proper tree spacing during recovery to maximise airflow and reduce moisture retention.'}
+                            {currentScan.expertTip ?? t.defaultExpertTip}
                         </Text>
                     </View>
                 </View>
@@ -198,18 +197,16 @@ const styles = StyleSheet.create({
         shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.03, shadowRadius: 10, elevation: 1,
     },
     cardOngoing: { borderWidth: 1, borderColor: '#f0fdf4' },
-    cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-    milestoneTitle: { fontSize: 15, fontWeight: '700', color: '#111827' },
+    cardHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 8 },
+    milestoneTitle: { fontSize: 15, fontWeight: '700', color: '#111827', flex: 1 },
     statusBadgeOngoing: { backgroundColor: '#dcfce7', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
     statusTextOngoing: { color: '#166534', fontSize: 9, fontWeight: '800' },
-    milestoneDesc: { fontSize: 13, color: '#4b5563', lineHeight: 18, marginBottom: 16 },
-    updateBtn: { backgroundColor: '#235e45', alignSelf: 'stretch', paddingVertical: 12, borderRadius: 14, alignItems: 'center' },
-    updateBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+    milestoneDesc: { fontSize: 13, color: '#4b5563', lineHeight: 18 },
     cardCompleted: { backgroundColor: '#f9fafb', opacity: 0.8 },
-    completedTitle: { fontSize: 15, fontWeight: '700', color: '#6b7280', textDecorationLine: 'line-through' },
+    completedTitle: { fontSize: 15, fontWeight: '700', color: '#6b7280', textDecorationLine: 'line-through', flex: 1 },
     completedDesc: { fontSize: 13, color: '#9ca3af', lineHeight: 18 },
     cardUpcoming: { borderStyle: 'dashed', borderWidth: 1, borderColor: '#e5e7eb', backgroundColor: '#fdfdfd' },
-    upcomingTitle: { fontSize: 15, fontWeight: '700', color: '#374151' },
+    upcomingTitle: { fontSize: 15, fontWeight: '700', color: '#374151', flex: 1 },
     statusBadgeUpcoming: { backgroundColor: '#f3f4f6', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
     statusTextUpcoming: { color: '#6b7280', fontSize: 9, fontWeight: '800' },
     upcomingDesc: { fontSize: 13, color: '#6b7280', lineHeight: 18 },

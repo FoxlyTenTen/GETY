@@ -8,6 +8,7 @@ import { router, useFocusEffect } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import AppHeader from '@/components/common/AppHeader';
 import { supabase } from '@/lib/supabase';
+import { useLanguage } from '@/context/LanguageContext';
 
 // ─── Types (plan-centric — queried FROM treatment_plans) ───────────────────────
 
@@ -58,6 +59,7 @@ function formatDue(iso: string | null) {
 // ─── Main Component ─────────────────────────────────────────────────────────────
 
 export default function MilestonePage() {
+    const { t } = useLanguage();
     const [plans, setPlans] = useState<DbPlan[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
@@ -140,10 +142,10 @@ export default function MilestonePage() {
         return (
             <SafeAreaView style={styles.safe}>
                 <StatusBar barStyle="dark-content" backgroundColor="#f8faf9" />
-                <AppHeader title="Milestones" />
+                <AppHeader title={t.milestonesTitle} />
                 <View style={styles.center}>
                     <ActivityIndicator size="large" color="#1e5b43" />
-                    <Text style={styles.emptyText}>Loading milestones...</Text>
+                    <Text style={styles.emptyText}>{t.loadingMilestones}</Text>
                 </View>
             </SafeAreaView>
         );
@@ -153,13 +155,13 @@ export default function MilestonePage() {
     if (error) {
         return (
             <SafeAreaView style={styles.safe}>
-                <AppHeader title="Milestones" />
+                <AppHeader title={t.milestonesTitle} />
                 <View style={styles.center}>
                     <Ionicons name="cloud-offline-outline" size={48} color="#d1d5db" />
-                    <Text style={styles.emptyTitle}>Could not load milestones</Text>
+                    <Text style={styles.emptyTitle}>{t.couldNotLoad}</Text>
                     <Text style={styles.emptyText}>{error}</Text>
                     <TouchableOpacity onPress={load} style={styles.scanNowBtn}>
-                        <Text style={styles.scanNowText}>Retry</Text>
+                        <Text style={styles.scanNowText}>{t.retry}</Text>
                     </TouchableOpacity>
                 </View>
             </SafeAreaView>
@@ -171,20 +173,18 @@ export default function MilestonePage() {
         return (
             <SafeAreaView style={styles.safe}>
                 <StatusBar barStyle="dark-content" backgroundColor="#f8faf9" />
-                <AppHeader title="Milestones" />
+                <AppHeader title={t.milestonesTitle} />
                 <View style={styles.center}>
                     <Ionicons name="flag-outline" size={48} color="#d1d5db" />
-                    <Text style={styles.emptyTitle}>No Milestones Yet</Text>
-                    <Text style={styles.emptyText}>
-                        Scan a leaf and save the report to start tracking treatment milestones.
-                    </Text>
+                    <Text style={styles.emptyTitle}>{t.noMilestonesYet}</Text>
+                    <Text style={styles.emptyText}>{t.noMilestonesDesc}</Text>
                     <TouchableOpacity
                         style={styles.scanNowBtn}
                         onPress={() => router.push('/pages/scanpage' as any)}
                         activeOpacity={0.85}
                     >
                         <Ionicons name="scan-outline" size={18} color="#fff" />
-                        <Text style={styles.scanNowText}>Scan Now</Text>
+                        <Text style={styles.scanNowText}>{t.scanNow}</Text>
                     </TouchableOpacity>
                 </View>
             </SafeAreaView>
@@ -198,7 +198,7 @@ export default function MilestonePage() {
     return (
         <SafeAreaView style={styles.safe}>
             <StatusBar barStyle="dark-content" backgroundColor="#f8faf9" />
-            <AppHeader title="Milestones" />
+            <AppHeader title={t.milestonesTitle} />
 
             <ScrollView
                 showsVerticalScrollIndicator={false}
@@ -211,21 +211,21 @@ export default function MilestonePage() {
                 <View style={styles.summaryRow}>
                     <View style={styles.summaryChip}>
                         <Text style={styles.summaryNum}>{plans.length}</Text>
-                        <Text style={styles.summaryLabel}>Total</Text>
+                        <Text style={styles.summaryLabel}>{t.total}</Text>
                     </View>
                     <View style={[styles.summaryChip, { backgroundColor: '#fff3e0' }]}>
                         <Text style={[styles.summaryNum, { color: '#f59e0b' }]}>{active.length}</Text>
-                        <Text style={styles.summaryLabel}>In Progress</Text>
+                        <Text style={styles.summaryLabel}>{t.inProgress}</Text>
                     </View>
                     <View style={[styles.summaryChip, { backgroundColor: '#dcfce7' }]}>
                         <Text style={[styles.summaryNum, { color: '#166534' }]}>{completed.length}</Text>
-                        <Text style={styles.summaryLabel}>Completed</Text>
+                        <Text style={styles.summaryLabel}>{t.completed}</Text>
                     </View>
                 </View>
 
                 {active.length > 0 && (
                     <>
-                        <Text style={styles.sectionTitle}>IN PROGRESS</Text>
+                        <Text style={styles.sectionTitle}>{t.inProgressSection}</Text>
                         {active.map(plan => (
                             <MilestoneCard key={plan.id} plan={plan} onPress={() => handlePress(plan)} />
                         ))}
@@ -234,7 +234,7 @@ export default function MilestonePage() {
 
                 {completed.length > 0 && (
                     <>
-                        <Text style={styles.sectionTitle}>COMPLETED</Text>
+                        <Text style={styles.sectionTitle}>{t.completedSection}</Text>
                         {completed.map(plan => (
                             <MilestoneCard key={plan.id} plan={plan} onPress={() => handlePress(plan)} />
                         ))}
@@ -250,6 +250,7 @@ export default function MilestonePage() {
 // ─── Milestone Card ─────────────────────────────────────────────────────────────
 
 function MilestoneCard({ plan, onPress }: { plan: DbPlan; onPress: () => void }) {
+    const { t } = useLanguage();
     const steps = (plan.treatment_plan_steps ?? []).sort((a, b) => a.step_order - b.step_order);
     const total = steps.length;
     const done  = steps.filter(s => s.status === 'completed').length;
@@ -271,16 +272,21 @@ function MilestoneCard({ plan, onPress }: { plan: DbPlan; onPress: () => void })
                 <View style={styles.cardTopLeft}>
                     <View style={[styles.riskBadge, { backgroundColor: riskBg(risk) }]}>
                         <Text style={[styles.riskText, { color: riskColor(risk) }]}>
-                            {riskLabel(risk)} RISK
+                            {t.riskLabel(risk)}
                         </Text>
                     </View>
-                    <Text style={styles.cardDisease} numberOfLines={2}>
-                        {scan?.disease_name ?? 'Unknown Disease'}
+                    <Text style={styles.cardDisease} numberOfLines={1}>
+                        {tree?.label_name || scan?.disease_name || 'Unknown'}
                     </Text>
+                    {tree?.label_name ? (
+                        <Text style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }} numberOfLines={1}>
+                            {scan?.disease_name}
+                        </Text>
+                    ) : null}
                 </View>
                 <View style={styles.circleWrap}>
                     <Text style={styles.circleNum}>{done}/{total}</Text>
-                    <Text style={styles.circleLabel}>done</Text>
+                    <Text style={styles.circleLabel}>{t.done}</Text>
                 </View>
             </View>
 
@@ -308,13 +314,13 @@ function MilestoneCard({ plan, onPress }: { plan: DbPlan; onPress: () => void })
                 {isCompleted ? (
                     <>
                         <Ionicons name="checkmark-circle" size={14} color="#2eb86a" />
-                        <Text style={[styles.nextText, { color: '#2eb86a' }]}>All milestones completed 🎉</Text>
+                        <Text style={[styles.nextText, { color: '#2eb86a' }]}>{t.allMilestonesCompleted}</Text>
                     </>
                 ) : nextStep ? (
                     <>
                         <Ionicons name="arrow-forward-circle-outline" size={14} color="#1e5b43" />
                         <Text style={styles.nextText}>
-                            Next: {nextStep.title}{nextDue ? ` · ${nextDue}` : ''}
+                            {t.next(nextStep.title, nextDue)}
                         </Text>
                     </>
                 ) : null}

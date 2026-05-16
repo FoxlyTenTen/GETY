@@ -14,6 +14,7 @@ import {
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
 import { useAuth } from '@/context/AuthContext';
+import { useLanguage } from '@/context/LanguageContext';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const DRAWER_WIDTH = SCREEN_WIDTH * 0.72;
@@ -24,6 +25,7 @@ type AppHeaderProps = {
 
 export default function AppHeader({ title }: AppHeaderProps) {
     const { session, signOut } = useAuth();
+    const { language, setLanguage, t } = useLanguage();
     const isLoggedIn = !!session;
     const [drawerOpen, setDrawerOpen] = useState(false);
     const slideAnim = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
@@ -66,9 +68,9 @@ export default function AppHeader({ title }: AppHeaderProps) {
 
     const handleSignOut = () => {
         closeDrawer(() => {
-            Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Sign Out', style: 'destructive', onPress: signOut },
+            Alert.alert(t.signOutConfirmTitle, t.signOutConfirmMsg, [
+                { text: t.cancel, style: 'cancel' },
+                { text: t.signOut, style: 'destructive', onPress: signOut },
             ]);
         });
     };
@@ -105,7 +107,7 @@ export default function AppHeader({ title }: AppHeaderProps) {
                         activeOpacity={0.85}
                     >
                         <Ionicons name="person-outline" size={14} color="#fff" />
-                        <Text style={styles.signInText}>Sign In</Text>
+                        <Text style={styles.signInText}>{t.signInBtn}</Text>
                     </TouchableOpacity>
                 )}
             </View>
@@ -125,13 +127,13 @@ export default function AppHeader({ title }: AppHeaderProps) {
                             <Ionicons name="leaf" size={22} color="#fff" />
                         </View>
                         <View>
-                            <Text style={styles.drawerAppName}>LatexGuard</Text>
+                            <Text style={styles.drawerAppName}>{t.appName}</Text>
                             {isLoggedIn ? (
                                 <Text style={styles.drawerEmail} numberOfLines={1}>
                                     {session?.user?.email}
                                 </Text>
                             ) : (
-                                <Text style={styles.drawerEmailGuest}>Guest</Text>
+                                <Text style={styles.drawerEmailGuest}>{t.guest}</Text>
                             )}
                         </View>
                     </View>
@@ -143,29 +145,57 @@ export default function AppHeader({ title }: AppHeaderProps) {
                     <View style={styles.menuItems}>
                         <DrawerItem
                             icon="home-outline"
-                            label="Home"
+                            label={t.menuHome}
                             onPress={() => closeDrawer(() => router.push('/(tabs)' as any))}
                         />
                         <DrawerItem
                             icon="scan-outline"
-                            label="Scan Leaf"
+                            label={t.menuScan}
                             onPress={() => closeDrawer(() => router.push('/pages/scanpage' as any))}
                         />
                         <DrawerItem
                             icon="time-outline"
-                            label="History"
+                            label={t.menuHistory}
                             onPress={() => closeDrawer(() => router.push('/(tabs)/history' as any))}
                         />
                         <DrawerItem
                             icon="notifications-outline"
-                            label="Reminders"
+                            label={t.menuReminders}
                             onPress={() => closeDrawer(() => router.push('/(tabs)/reminder' as any))}
                         />
                         <DrawerItem
                             icon="settings-outline"
-                            label="Settings"
+                            label={t.menuSettings}
                             onPress={() => closeDrawer()}
                         />
+                    </View>
+
+                    {/* Divider */}
+                    <View style={styles.divider} />
+
+                    {/* Language Toggle */}
+                    <View style={styles.langSection}>
+                        <Text style={styles.langLabel}>{t.language}</Text>
+                        <View style={styles.langToggleRow}>
+                            <TouchableOpacity
+                                style={[styles.langPill, language === 'en' && styles.langPillActive]}
+                                onPress={() => setLanguage('en')}
+                                activeOpacity={0.8}
+                            >
+                                <Text style={[styles.langPillText, language === 'en' && styles.langPillTextActive]}>
+                                    English
+                                </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.langPill, language === 'ms' && styles.langPillActive]}
+                                onPress={() => setLanguage('ms')}
+                                activeOpacity={0.8}
+                            >
+                                <Text style={[styles.langPillText, language === 'ms' && styles.langPillTextActive]}>
+                                    Melayu
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
                     </View>
 
                     {/* Divider */}
@@ -176,7 +206,7 @@ export default function AppHeader({ title }: AppHeaderProps) {
                         {isLoggedIn ? (
                             <DrawerItem
                                 icon="log-out-outline"
-                                label="Sign Out"
+                                label={t.signOut}
                                 onPress={handleSignOut}
                                 danger
                             />
@@ -184,13 +214,13 @@ export default function AppHeader({ title }: AppHeaderProps) {
                             <>
                                 <DrawerItem
                                     icon="log-in-outline"
-                                    label="Sign In"
+                                    label={t.signIn}
                                     onPress={handleSignIn}
                                     highlight
                                 />
                                 <DrawerItem
                                     icon="person-add-outline"
-                                    label="Create Account"
+                                    label={t.createAccount}
                                     onPress={handleRegister}
                                 />
                             </>
@@ -199,7 +229,7 @@ export default function AppHeader({ title }: AppHeaderProps) {
 
                     {/* Footer */}
                     <View style={styles.drawerFooter}>
-                        <Text style={styles.drawerFooterText}>LatexGuard v1.0 · FYP 2025</Text>
+                        <Text style={styles.drawerFooterText}>{t.footer}</Text>
                     </View>
                 </Animated.View>
             </Modal>
@@ -307,6 +337,18 @@ const styles = StyleSheet.create({
         borderRadius: 16, marginBottom: 2,
     },
     drawerItemText: { fontSize: 15, fontWeight: '600' },
+
+    // Language toggle
+    langSection: { paddingHorizontal: 24, paddingVertical: 12 },
+    langLabel: { fontSize: 11, fontWeight: '700', color: '#9ca3af', marginBottom: 10, letterSpacing: 0.5, textTransform: 'uppercase' },
+    langToggleRow: { flexDirection: 'row', gap: 8 },
+    langPill: {
+        flex: 1, alignItems: 'center', paddingVertical: 10,
+        borderRadius: 14, backgroundColor: '#f3f4f6',
+    },
+    langPillActive: { backgroundColor: '#1e5b43' },
+    langPillText: { fontSize: 13, fontWeight: '700', color: '#6b7280' },
+    langPillTextActive: { color: '#fff' },
 
     drawerFooter: {
         position: 'absolute', bottom: 32, left: 0, right: 0,

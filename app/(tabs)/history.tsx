@@ -4,13 +4,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import AppHeader from '@/components/common/AppHeader';
 import Dashboard from '@/components/history_comp/dashboard';
 import ScanHistoryList from '@/components/history_comp/scanhistorylist';
+import { useLanguage } from '@/context/LanguageContext';
 
 export default function HistoryPage() {
+    const { t } = useLanguage();
     return (
         <SafeAreaView style={styles.safeArea}>
             <StatusBar barStyle="dark-content" backgroundColor="#f8faf9" />
 
-            <AppHeader title="Scan History" />
+            <AppHeader title={t.scanHistory} />
 
             <ScrollView
                 showsVerticalScrollIndicator={false}

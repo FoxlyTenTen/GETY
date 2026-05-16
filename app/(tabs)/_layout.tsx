@@ -1,7 +1,9 @@
 import { Tabs } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useLanguage } from '@/context/LanguageContext';
 
 export default function TabLayout() {
+  const { t } = useLanguage();
   return (
     <Tabs
       screenOptions={{
@@ -23,7 +25,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Home',
+          title: t.tabHome,
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? 'home-sharp' : 'home-outline'} color={color} size={24} />
           ),
@@ -33,7 +35,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="history"
         options={{
-          title: 'History',
+          title: t.tabHistory,
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? 'time' : 'time-outline'} color={color} size={24} />
           ),
@@ -43,7 +45,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="milestone"
         options={{
-          title: 'Milestones',
+          title: t.tabMilestones,
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? 'flag' : 'flag-outline'} color={color} size={24} />
           ),
@@ -53,7 +55,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="assistant"
         options={{
-          title: 'Assistant',
+          title: t.tabAssistant,
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? 'chatbubble-ellipses' : 'chatbubble-ellipses-outline'} color={color} size={24} />
           ),

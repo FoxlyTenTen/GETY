@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import {
     StyleSheet, ScrollView, StatusBar, View, Text,
-    TouchableOpacity, ActivityIndicator,
+    TouchableOpacity, ActivityIndicator, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { supabase } from '@/lib/supabase';
+import { useLanguage } from '@/context/LanguageContext';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -25,6 +26,8 @@ type DbPlan = {
     title: string;
     overall_progress: number;
     estimated_recovery_days: number;
+    recommended_fungicide: string | null;
+    water_mix_ratio: string | null;
     expert_tip: string | null;
     status: 'active' | 'completed' | 'cancelled';
     treatment_plan_steps: DbStep[];
@@ -56,20 +59,17 @@ function formatDue(iso: string | null) {
     if (!iso) return 'TBD';
     return new Date(iso).toLocaleDateString('en-MY', { day: 'numeric', month: 'short' });
 }
-function parseFungicide(tip: string | null) {
-    if (!tip) return null;
-    const match = tip.match(/^Apply (.+?) \((.+?)\)/);
-    return match ? { fungicide: match[1], waterMix: match[2] } : null;
-}
 
 // ─── Main Component ─────────────────────────────────────────────────────────────
 
 export default function MilestoneDetailPage() {
     const { scanId } = useLocalSearchParams<{ scanId: string }>();
+    const { t } = useLanguage();
 
-    const [plan, setPlan]       = useState<DbPlan | null>(null);
-    const [loading, setLoading] = useState(true);
-    const [error, setError]     = useState<string | null>(null);
+    const [plan, setPlan]           = useState<DbPlan | null>(null);
+    const [loading, setLoading]     = useState(true);
+    const [error, setError]         = useState<string | null>(null);
+    const [updatingStepId, setUpdatingStepId] = useState<string | null>(null);
 
     useEffect(() => {
         if (!scanId) { setError('No scan ID provided'); setLoading(false); return; }
@@ -89,6 +89,8 @@ export default function MilestoneDetailPage() {
                     title,
                     overall_progress,
                     estimated_recovery_days,
+                    recommended_fungicide,
+                    water_mix_ratio,
                     expert_tip,
                     status,
                     treatment_plan_steps (
@@ -115,13 +117,52 @@ export default function MilestoneDetailPage() {
         }
     };
 
+    const updateStepProgress = async (stepId: string) => {
+        if (!plan) return;
+        setUpdatingStepId(stepId);
+        try {
+            // 1. Mark this step completed
+            await supabase.from('treatment_plan_steps').update({
+                status: 'completed',
+                progress_percent: 100,
+                completed_at: new Date().toISOString(),
+            }).eq('id', stepId);
+
+            // 2. Activate the next step
+            const sorted = [...(plan.treatment_plan_steps ?? [])].sort((a, b) => a.step_order - b.step_order);
+            const current = sorted.find(s => s.id === stepId);
+            const next    = sorted.find(s => s.step_order === (current?.step_order ?? 0) + 1);
+            if (next) {
+                await supabase.from('treatment_plan_steps')
+                    .update({ status: 'ongoing' }).eq('id', next.id);
+            }
+
+            // 3. Recalculate overall progress
+            const total    = sorted.length;
+            const doneNow  = sorted.filter(s => s.status === 'completed').length + 1;
+            const progress = total > 0 ? Math.round((doneNow / total) * 100) : 0;
+            await supabase.from('treatment_plans').update({
+                overall_progress: progress,
+                status: progress === 100 ? 'completed' : 'active',
+            }).eq('id', plan.id);
+
+            // 4. Re-fetch to reflect updated state
+            await fetchPlan();
+        } catch (e: any) {
+            console.error('[updateStep] error:', e?.message ?? e);
+            Alert.alert(t.updateFailed, e?.message ?? 'Could not update step.');
+        } finally {
+            setUpdatingStepId(null);
+        }
+    };
+
     // ── Loading ────────────────────────────────────────────────────────────────
     if (loading) {
         return (
             <SafeAreaView style={styles.safe}>
                 <View style={styles.center}>
                     <ActivityIndicator size="large" color="#1e5b43" />
-                    <Text style={styles.emptyText}>Loading milestone...</Text>
+                    <Text style={styles.emptyText}>{t.loadingMilestoneDetail}</Text>
                 </View>
             </SafeAreaView>
         );
@@ -133,9 +174,9 @@ export default function MilestoneDetailPage() {
             <SafeAreaView style={styles.safe}>
                 <View style={styles.center}>
                     <Ionicons name="alert-circle-outline" size={48} color="#d1d5db" />
-                    <Text style={styles.emptyText}>{error ?? 'Milestone not found.'}</Text>
+                    <Text style={styles.emptyText}>{error ?? t.milestoneNotFound}</Text>
                     <TouchableOpacity onPress={() => router.back()} style={styles.backLinkBtn}>
-                        <Text style={styles.backLinkText}>Go Back</Text>
+                        <Text style={styles.backLinkText}>{t.goBack}</Text>
                     </TouchableOpacity>
                 </View>
             </SafeAreaView>
@@ -152,7 +193,8 @@ export default function MilestoneDetailPage() {
     const location    = tree?.label_name || 'Unknown Location';
     const scanDate    = scan?.scanned_at ? formatDate(scan.scanned_at) : '—';
     const risk        = scan?.risk_level ?? 'low';
-    const expert      = parseFungicide(plan.expert_tip);
+    const fungicide   = plan.recommended_fungicide ?? 'N/A';
+    const waterMix    = plan.water_mix_ratio ?? 'N/A';
 
     return (
         <SafeAreaView style={styles.safe}>
@@ -165,7 +207,7 @@ export default function MilestoneDetailPage() {
                 </TouchableOpacity>
                 <View style={styles.headerCenter}>
                     <Ionicons name="flag" size={18} color="#1e5b43" />
-                    <Text style={styles.headerTitle}>Milestone Detail</Text>
+                    <Text style={styles.headerTitle}>{t.milestoneDetail}</Text>
                 </View>
                 <View style={{ width: 38 }} />
             </View>
@@ -176,7 +218,7 @@ export default function MilestoneDetailPage() {
                 <View style={styles.summaryCard}>
                     <View style={[styles.riskBadge, { backgroundColor: riskBg(risk) }]}>
                         <Text style={[styles.riskText, { color: riskColor(risk) }]}>
-                            {riskLabel(risk)} RISK
+                            {t.riskLabel(risk)}
                         </Text>
                     </View>
                     <Text style={styles.diseaseName}>{scan?.disease_name ?? 'Unknown Disease'}</Text>
@@ -191,42 +233,42 @@ export default function MilestoneDetailPage() {
 
                     {/* Progress bar */}
                     <View style={styles.progRow}>
-                        <Text style={styles.progLabel}>Progress</Text>
+                        <Text style={styles.progLabel}>{t.progress}</Text>
                         <Text style={styles.progPct}>{progressPct}%</Text>
                     </View>
                     <View style={styles.progressBg}>
                         <View style={[styles.progressFill, { width: `${progressPct}%` as any }]} />
                     </View>
-                    <Text style={styles.progSub}>{done} of {total} milestones completed</Text>
+                    <Text style={styles.progSub}>{t.milestonesCompletedOf(done, total)}</Text>
                 </View>
 
                 {/* ── Treatment Info ── */}
                 <View style={styles.infoCard}>
-                    <Text style={styles.infoTitle}>Treatment Info</Text>
+                    <Text style={styles.infoTitle}>{t.treatmentInfo}</Text>
                     <View style={styles.infoRow}>
                         <View style={styles.infoItem}>
                             <Ionicons name="flask-outline" size={18} color="#1e5b43" />
-                            <Text style={styles.infoLabel}>Fungicide</Text>
-                            <Text style={styles.infoValue}>{expert?.fungicide ?? 'N/A'}</Text>
+                            <Text style={styles.infoLabel}>{t.fungicide}</Text>
+                            <Text style={styles.infoValue}>{fungicide}</Text>
                         </View>
                         <View style={styles.infoDivider} />
                         <View style={styles.infoItem}>
                             <Ionicons name="water-outline" size={18} color="#1e5b43" />
-                            <Text style={styles.infoLabel}>Water Mix</Text>
-                            <Text style={styles.infoValue}>{expert?.waterMix ?? 'N/A'}</Text>
+                            <Text style={styles.infoLabel}>{t.waterMix}</Text>
+                            <Text style={styles.infoValue}>{waterMix}</Text>
                         </View>
                         <View style={styles.infoDivider} />
                         <View style={styles.infoItem}>
                             <Ionicons name="calendar-outline" size={18} color="#1e5b43" />
-                            <Text style={styles.infoLabel}>Day Plan</Text>
-                            <Text style={styles.infoValue}>{plan.estimated_recovery_days} days</Text>
+                            <Text style={styles.infoLabel}>{t.dayPlan}</Text>
+                            <Text style={styles.infoValue}>{t.daysShort(plan.estimated_recovery_days)}</Text>
                         </View>
                     </View>
                 </View>
 
                 {/* ── Milestone Timeline ── */}
                 <View style={styles.timelineContainer}>
-                    <Text style={styles.timelineTitle}>Milestone Steps</Text>
+                    <Text style={styles.timelineTitle}>{t.milestoneSteps}</Text>
 
                     {steps.map((step, idx) => {
                         const isCompleted = step.status === 'completed';
@@ -266,7 +308,7 @@ export default function MilestoneDetailPage() {
                                         </Text>
                                         {isCurrent && (
                                             <View style={styles.currentBadge}>
-                                                <Text style={styles.currentBadgeText}>CURRENT</Text>
+                                                <Text style={styles.currentBadgeText}>{t.current}</Text>
                                             </View>
                                         )}
                                     </View>
@@ -278,10 +320,23 @@ export default function MilestoneDetailPage() {
                                         <Text style={styles.stepDue}>{dueLabel}</Text>
                                         {isCompleted && step.completed_at && (
                                             <Text style={styles.stepCompletedAt}>
-                                                · Done {formatDue(step.completed_at)}
+                                                {t.done2(formatDue(step.completed_at))}
                                             </Text>
                                         )}
                                     </View>
+                                    {isCurrent && (
+                                        <TouchableOpacity
+                                            style={styles.updateBtn}
+                                            onPress={() => updateStepProgress(step.id)}
+                                            disabled={updatingStepId === step.id}
+                                            activeOpacity={0.85}
+                                        >
+                                            {updatingStepId === step.id
+                                                ? <ActivityIndicator size="small" color="#fff" />
+                                                : <Text style={styles.updateBtnText}>{t.markAsDone}</Text>
+                                            }
+                                        </TouchableOpacity>
+                                    )}
                                 </View>
                             </View>
                         );
@@ -291,7 +346,7 @@ export default function MilestoneDetailPage() {
                 {/* ── Footer ── */}
                 <View style={styles.footer}>
                     <TouchableOpacity style={styles.monitorBtn} onPress={() => router.back()} activeOpacity={0.85}>
-                        <Text style={styles.monitorText}>Back to Milestones</Text>
+                        <Text style={styles.monitorText}>{t.backToMilestones}</Text>
                         <Ionicons name="arrow-forward" size={20} color="#fff" />
                     </TouchableOpacity>
                 </View>
@@ -382,6 +437,12 @@ const styles = StyleSheet.create({
     stepDueRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     stepDue:    { fontSize: 12, color: '#9ca3af' },
     stepCompletedAt: { fontSize: 11, color: '#2eb86a', fontWeight: '600' },
+    updateBtn: {
+        backgroundColor: '#1e5b43', paddingVertical: 12, paddingHorizontal: 20,
+        borderRadius: 14, alignSelf: 'flex-start', marginTop: 12,
+        minWidth: 140, alignItems: 'center', justifyContent: 'center',
+    },
+    updateBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
 
     footer: { marginBottom: 8 },
     monitorBtn: {

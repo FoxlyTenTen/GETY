@@ -11,6 +11,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import Markdown from 'react-native-markdown-display';
 import AppHeader from '@/components/common/AppHeader';
 import { queryRAG, RAGResponse } from '@/lib/supabase';
+import { useLanguage } from '@/context/LanguageContext';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -22,16 +23,18 @@ type ChatMessage = {
     isError?: boolean;
 };
 
-const SUGGESTED = [
-    { id: '1', label: 'What is Pestalotiopsis?' },
-    { id: '2', label: 'How to apply Mancozeb?' },
-    { id: '3', label: 'Best time to spray fungicide' },
-    { id: '4', label: 'Signs of leaf recovery' },
-];
+// Suggested questions are now built from translations inside the component
 
 // ─── Main Component ─────────────────────────────────────────────────────────
 
 export default function AssistantScreen() {
+    const { t } = useLanguage();
+    const SUGGESTED = [
+        { id: '1', label: t.suggested1 },
+        { id: '2', label: t.suggested2 },
+        { id: '3', label: t.suggested3 },
+        { id: '4', label: t.suggested4 },
+    ];
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [inputText, setInputText] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -72,7 +75,7 @@ export default function AssistantScreen() {
             const errorMsg: ChatMessage = {
                 id: (Date.now() + 1).toString(),
                 role: 'assistant',
-                content: err.message || 'Something went wrong. Please try again.',
+                content: err.message || t.inputPlaceholder,
                 isError: true,
             };
             setMessages(prev => [...prev, errorMsg]);
@@ -145,7 +148,7 @@ export default function AssistantScreen() {
                             onPress={() => handleRetry(item)}
                         >
                             <Ionicons name="refresh" size={14} color="#dc2626" />
-                            <Text style={styles.retryText}>Retry</Text>
+                            <Text style={styles.retryText}>{t.retryBtn}</Text>
                         </TouchableOpacity>
                     )}
                 </View>
@@ -163,14 +166,12 @@ export default function AssistantScreen() {
                     <View style={styles.botIconContainer}>
                         <MaterialCommunityIcons name="robot" size={32} color="#fff" />
                     </View>
-                    <Text style={styles.introTitle}>Ask me anything</Text>
-                    <Text style={styles.introSubtitle}>
-                        I can help you understand your scan results, explain diseases, and guide you through the treatment plan.
-                    </Text>
+                    <Text style={styles.introTitle}>{t.askMeAnything}</Text>
+                    <Text style={styles.introSubtitle}>{t.assistantIntro}</Text>
                 </View>
 
                 {/* Suggested Prompts */}
-                <Text style={styles.sectionTitle}>Suggested Questions</Text>
+                <Text style={styles.sectionTitle}>{t.suggestedQuestions}</Text>
                 <View style={styles.suggestedList}>
                     {SUGGESTED.map(item => (
                         <TouchableOpacity
@@ -210,7 +211,7 @@ export default function AssistantScreen() {
                         </View>
                         <View style={styles.typingBubble}>
                             <ActivityIndicator size="small" color="#1e5b43" />
-                            <Text style={styles.typingText}>Thinking...</Text>
+                            <Text style={styles.typingText}>{t.thinking}</Text>
                         </View>
                     </View>
                 ) : null}
@@ -223,7 +224,7 @@ export default function AssistantScreen() {
     return (
         <SafeAreaView style={styles.container}>
             <StatusBar style="dark" />
-            <AppHeader title="AI Assistant" />
+            <AppHeader title={t.aiAssistantTitle} />
 
             <KeyboardAvoidingView
                 style={{ flex: 1 }}
@@ -237,7 +238,7 @@ export default function AssistantScreen() {
                     <View style={styles.inputRow}>
                         <TextInput
                             style={styles.input}
-                            placeholder="Ask about your scan or treatment..."
+                            placeholder={t.inputPlaceholder}
                             placeholderTextColor="#9ca3af"
                             multiline
                             value={inputText}
