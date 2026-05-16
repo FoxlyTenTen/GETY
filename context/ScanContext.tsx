@@ -8,6 +8,7 @@ export type TreatmentStep = {
     desc: string;
     status: 'completed' | 'current' | 'upcoming';
     date?: string;
+    dayOffset?: number;
 };
 
 export type ScanResult = {
@@ -17,7 +18,7 @@ export type ScanResult = {
     risk: 'High' | 'Medium' | 'Low';
     description: string;
     whatToDo: string[];
-    preventionTips: { title: string; desc: string }[];
+    fungicideTips: { title: string; desc: string }[];
     fungicide: string;
     waterMix: string;
     dayPlan: number;

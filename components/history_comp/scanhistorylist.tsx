@@ -280,7 +280,16 @@ function ScanCard({ item, onPress }: { item: DbScan; onPress: () => void }) {
             {/* Card body */}
             <View style={styles.cardBody}>
                 <View style={styles.topRow}>
-                    <Text style={styles.diseaseName} numberOfLines={2}>{item.disease_name}</Text>
+                    <View style={{ flex: 1 }}>
+                        <Text style={styles.diseaseName} numberOfLines={1}>
+                            {tree?.label_name || item.disease_name}
+                        </Text>
+                        {tree?.label_name ? (
+                            <Text style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }} numberOfLines={1}>
+                                {item.disease_name}
+                            </Text>
+                        ) : null}
+                    </View>
                     <View style={styles.confPill}>
                         <Text style={styles.confText}>{item.confidence_score}%</Text>
                     </View>

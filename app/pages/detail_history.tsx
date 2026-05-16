@@ -395,17 +395,19 @@ export default function DetailHistoryPage() {
 
             {/* Bottom Actions */}
             <View style={styles.bottomActions}>
-                <TouchableOpacity
-                    style={styles.primaryBtn}
-                    onPress={() => router.push({
-                        pathname: '/pages/milestone_detail' as any,
-                        params: { scanId: scan.id },
-                    })}
-                    activeOpacity={0.85}
-                >
-                    <Ionicons name="flag-outline" size={18} color="#fff" />
-                    <Text style={styles.primaryBtnText}>View Milestones</Text>
-                </TouchableOpacity>
+                {plan && (
+                    <TouchableOpacity
+                        style={styles.primaryBtn}
+                        onPress={() => router.push({
+                            pathname: '/pages/milestone_detail' as any,
+                            params: { scanId: scan.id },
+                        })}
+                        activeOpacity={0.85}
+                    >
+                        <Ionicons name="flag-outline" size={18} color="#fff" />
+                        <Text style={styles.primaryBtnText}>View Milestones</Text>
+                    </TouchableOpacity>
+                )}
                 <TouchableOpacity style={styles.secondaryBtn} onPress={() => router.back()} activeOpacity={0.85}>
                     <Ionicons name="arrow-back-outline" size={18} color={COLORS.warningText} />
                     <Text style={styles.secondaryBtnText}>Back to History</Text>

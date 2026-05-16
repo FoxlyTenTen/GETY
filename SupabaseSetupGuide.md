@@ -743,7 +743,28 @@ auth.users  (Supabase built-in — controls login)
             │                                       │
             │                                       └── treatment_step_updates  (treatment_plan_step_id)
             │
-            └── knowledge_base_files  (uploaded_by → auth.users.id)  [admin only]
+---
+
+## Step 9 — Add Fungicide Columns to `treatment_plans`
+
+Run this migration to add `recommended_fungicide` and `water_mix_ratio` columns to `treatment_plans`. These are saved when a report is saved and displayed in the Milestone Detail page.
+
+```sql
+ALTER TABLE treatment_plans
+  ADD COLUMN IF NOT EXISTS recommended_fungicide TEXT,
+  ADD COLUMN IF NOT EXISTS water_mix_ratio TEXT;
+```
+
+**Why:** Previously, `milestone_detail.tsx` tried to parse fungicide info from the free-text `expert_tip` field using a regex. With AI-generated tips this regex always fails, showing "N/A". Now fungicide and water mix are stored as proper columns, populated directly from the scan result.
+
+---
+
+## Table Relationships
+
+```
+auth.users  (Supabase built-in)
+    │
+    └── knowledge_base_files  (uploaded_by → auth.users.id)  [admin only]
                     ├── Storage: knowledge-base bucket  (PDF/TXT files)
                     └── knowledge_base_chunks  (file_id → knowledge_base_files.id)
                             └── embedding vector(768)  [pgvector, used by RAG queries]
