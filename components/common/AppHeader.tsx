@@ -161,7 +161,7 @@ export default function AppHeader({ title }: AppHeaderProps) {
                         <DrawerItem
                             icon="notifications-outline"
                             label={t.menuReminders}
-                            onPress={() => closeDrawer(() => router.push('/(tabs)/reminder' as any))}
+                            onPress={() => closeDrawer(() => router.push('/pages/notifications' as any))}
                         />
                         <DrawerItem
                             icon="settings-outline"

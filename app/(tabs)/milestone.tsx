@@ -1,47 +1,21 @@
 import React, { useState, useCallback } from 'react';
 import {
     StyleSheet, ScrollView, StatusBar, View, Text,
-    TouchableOpacity, ActivityIndicator, RefreshControl,
+    TouchableOpacity, ActivityIndicator, RefreshControl, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import AppHeader from '@/components/common/AppHeader';
 import { supabase } from '@/lib/supabase';
 import { useLanguage } from '@/context/LanguageContext';
+import { QUERY_KEYS, fetchPlans, MilestoneDbPlan } from '@/lib/queries';
 
-// ─── Types (plan-centric — queried FROM treatment_plans) ───────────────────────
+// ─── Types (re-exported from queries.ts) ───────────────────────────────────────
 
-type DbStep = {
-    id: string;
-    step_order: number;
-    title: string;
-    status: 'locked' | 'upcoming' | 'ongoing' | 'completed';
-    due_date: string | null;
-};
-
-type DbPlan = {
-    id: string;
-    overall_progress: number;
-    estimated_recovery_days: number;
-    expert_tip: string | null;
-    status: 'active' | 'completed' | 'cancelled';
-    created_at: string;
-    treatment_plan_steps: DbStep[];
-    scan: {
-        id: string;
-        disease_name: string;
-        risk_level: 'low' | 'medium' | 'high';
-        confidence_score: number;
-        scanned_at: string;
-    } | null;
-    tree: {
-        id: string;
-        label_name: string;
-        latitude: number | null;
-        longitude: number | null;
-    } | null;
-};
+type DbStep = MilestoneDbPlan['treatment_plan_steps'][number];
+type DbPlan = MilestoneDbPlan;
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -60,81 +34,53 @@ function formatDue(iso: string | null) {
 
 export default function MilestonePage() {
     const { t } = useLanguage();
-    const [plans, setPlans] = useState<DbPlan[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [refreshing, setRefreshing] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+    const queryClient = useQueryClient();
+    const [userId, setUserId] = useState<string | null>(null);
 
-    const load = useCallback(async () => {
-        setError(null);
-        try {
-            // Step 1: get current user
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) { setPlans([]); setLoading(false); setRefreshing(false); return; }
-
-            // Step 2: get all tree IDs for this user
-            const { data: userTrees, error: treeErr } = await supabase
-                .from('trees')
-                .select('id')
-                .eq('user_uid', user.id);
-
-            if (treeErr) throw treeErr;
-            const treeIds = (userTrees ?? []).map((t: { id: string }) => t.id);
-
-            if (treeIds.length === 0) {
-                setPlans([]); setLoading(false); setRefreshing(false); return;
-            }
-
-            // Step 3: query directly FROM treatment_plans (most reliable direction)
-            // treatment_plans.tree_id → trees.id  (direct FK, no ambiguity)
-            // treatment_plans.scan_id → scans.id  (embed scan data)
-            const { data, error: fetchErr } = await supabase
-                .from('treatment_plans')
-                .select(`
-                    id,
-                    status,
-                    overall_progress,
-                    estimated_recovery_days,
-                    expert_tip,
-                    created_at,
-                    treatment_plan_steps (
-                        id, step_order, title, status, due_date
-                    ),
-                    scan:scans (
-                        id, disease_name, risk_level, confidence_score, scanned_at
-                    ),
-                    tree:trees (
-                        id, label_name, latitude, longitude
-                    )
-                `)
-                .in('tree_id', treeIds)
-                .order('created_at', { ascending: false });
-
-            if (fetchErr) throw fetchErr;
-
-            console.log('[milestone] plans fetched:', data?.length ?? 0);
-            setPlans((data as unknown as DbPlan[]) ?? []);
-        } catch (e: any) {
-            console.error('[milestone] error:', e?.message ?? e);
-            setError(e?.message ?? 'Failed to load milestones');
-        } finally {
-            setLoading(false);
-            setRefreshing(false);
-        }
+    React.useEffect(() => {
+        supabase.auth.getUser().then(({ data: { user } }) => setUserId(user?.id ?? null));
     }, []);
 
-    useFocusEffect(useCallback(() => {
-        setLoading(true);
-        load();
-    }, [load]));
+    const { data: plans = [], isLoading: loading, error: queryError, refetch, isRefetching } = useQuery({
+        queryKey: QUERY_KEYS.plans(userId ?? ''),
+        queryFn: () => fetchPlans(userId!),
+        enabled: !!userId,
+    });
 
-    const onRefresh = () => { setRefreshing(true); load(); };
+    const error = queryError ? (queryError as Error).message : null;
+
+    useFocusEffect(useCallback(() => {
+        refetch();
+    }, [refetch]));
+
+    const onRefresh = () => { refetch(); };
 
     const handlePress = (plan: DbPlan) => {
-        // Pass the scan ID so milestone_detail can fetch full data
         if (plan.scan?.id) {
             router.push({ pathname: '/pages/milestone_detail' as any, params: { scanId: plan.scan.id } });
         }
+    };
+
+    const handleDelete = (plan: DbPlan) => {
+        Alert.alert(
+            'Delete Milestone Plan',
+            `Remove "${plan.scan?.disease_name ?? 'this plan'}" treatment plan? The scan record in History will not be affected.`,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Delete', style: 'destructive',
+                    onPress: async () => {
+                        // Steps are deleted automatically via ON DELETE CASCADE in Supabase
+                        const { error } = await supabase.from('treatment_plans').delete().eq('id', plan.id);
+                        if (error) { Alert.alert('Error', error.message); return; }
+                        if (userId) {
+                            queryClient.invalidateQueries({ queryKey: QUERY_KEYS.plans(userId) });
+                            queryClient.invalidateQueries({ queryKey: QUERY_KEYS.homeData(userId) });
+                        }
+                    },
+                },
+            ]
+        );
     };
 
     // ── Loading ──────────────────────────────────────────────────────────────
@@ -160,7 +106,7 @@ export default function MilestonePage() {
                     <Ionicons name="cloud-offline-outline" size={48} color="#d1d5db" />
                     <Text style={styles.emptyTitle}>{t.couldNotLoad}</Text>
                     <Text style={styles.emptyText}>{error}</Text>
-                    <TouchableOpacity onPress={load} style={styles.scanNowBtn}>
+                    <TouchableOpacity onPress={() => refetch()} style={styles.scanNowBtn}>
                         <Text style={styles.scanNowText}>{t.retry}</Text>
                     </TouchableOpacity>
                 </View>
@@ -204,7 +150,7 @@ export default function MilestonePage() {
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={styles.scroll}
                 refreshControl={
-                    <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#1e5b43" />
+                    <RefreshControl refreshing={isRefetching} onRefresh={onRefresh} tintColor="#1e5b43" />
                 }
             >
                 {/* ── Summary row ── */}
@@ -227,7 +173,7 @@ export default function MilestonePage() {
                     <>
                         <Text style={styles.sectionTitle}>{t.inProgressSection}</Text>
                         {active.map(plan => (
-                            <MilestoneCard key={plan.id} plan={plan} onPress={() => handlePress(plan)} />
+                            <MilestoneCard key={plan.id} plan={plan} onPress={() => handlePress(plan)} onDelete={() => handleDelete(plan)} />
                         ))}
                     </>
                 )}
@@ -236,7 +182,7 @@ export default function MilestonePage() {
                     <>
                         <Text style={styles.sectionTitle}>{t.completedSection}</Text>
                         {completed.map(plan => (
-                            <MilestoneCard key={plan.id} plan={plan} onPress={() => handlePress(plan)} />
+                            <MilestoneCard key={plan.id} plan={plan} onPress={() => handlePress(plan)} onDelete={() => handleDelete(plan)} />
                         ))}
                     </>
                 )}
@@ -249,7 +195,7 @@ export default function MilestonePage() {
 
 // ─── Milestone Card ─────────────────────────────────────────────────────────────
 
-function MilestoneCard({ plan, onPress }: { plan: DbPlan; onPress: () => void }) {
+function MilestoneCard({ plan, onPress, onDelete }: { plan: DbPlan; onPress: () => void; onDelete: () => void }) {
     const { t } = useLanguage();
     const steps = (plan.treatment_plan_steps ?? []).sort((a, b) => a.step_order - b.step_order);
     const total = steps.length;
@@ -284,9 +230,18 @@ function MilestoneCard({ plan, onPress }: { plan: DbPlan; onPress: () => void })
                         </Text>
                     ) : null}
                 </View>
-                <View style={styles.circleWrap}>
-                    <Text style={styles.circleNum}>{done}/{total}</Text>
-                    <Text style={styles.circleLabel}>{t.done}</Text>
+                <View style={{ alignItems: 'flex-end', gap: 8 }}>
+                    <TouchableOpacity
+                        onPress={(e) => { e.stopPropagation(); onDelete(); }}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        style={styles.deleteBtn}
+                    >
+                        <Ionicons name="trash-outline" size={16} color="#ef4444" />
+                    </TouchableOpacity>
+                    <View style={styles.circleWrap}>
+                        <Text style={styles.circleNum}>{done}/{total}</Text>
+                        <Text style={styles.circleLabel}>{t.done}</Text>
+                    </View>
                 </View>
             </View>
 
@@ -390,4 +345,8 @@ const styles = StyleSheet.create({
     nextRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
     nextText: { fontSize: 12, fontWeight: '600', color: '#374151', flex: 1 },
     chevron: { marginLeft: 'auto' },
+    deleteBtn: {
+        backgroundColor: '#fee2e2', borderRadius: 8,
+        padding: 6, alignItems: 'center', justifyContent: 'center',
+    },
 });

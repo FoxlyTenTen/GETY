@@ -23,11 +23,16 @@
       "package": "com.foxlyproxy.GETY"
     },
     "web": {
-      "output": "static",
+      "output": "single",
       "favicon": "./assets/images/favicon.png"
     },
+    "assetBundlePatterns": [
+      "assets/**",
+      "assets/model/*.tflite"
+    ],
     "plugins": [
       "expo-router",
+      "react-native-fast-tflite",
       [
         "expo-splash-screen",
         {

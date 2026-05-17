@@ -16,40 +16,29 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as ImagePicker from 'expo-image-picker';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { useLanguage } from '@/context/LanguageContext';
 
 const { width, height } = Dimensions.get('window');
 
-const tips = [
-  {
-    id: 1,
-    icon: 'sunny-outline' as const,
-    title: 'Good Lighting',
-    description: 'Ensure the leaf is well-lit for clarity',
-  },
-  {
-    id: 2,
-    icon: 'scan-outline' as const,
-    title: 'Fill Frame',
-    description: 'Get close enough to see vein details',
-  },
-  {
-    id: 3,
-    icon: 'partly-sunny-outline' as const,
-    title: 'Avoid Shadows',
-    description: 'No harsh shadows obscuring the leaf',
-  },
-  {
-    id: 4,
-    icon: 'leaf-outline' as const,
-    title: 'Single Leaf',
-    description: 'Focus on one leaf at a time for accuracy',
-  },
-];
+const TIP_ICONS = [
+  'sunny-outline',
+  'scan-outline',
+  'partly-sunny-outline',
+  'leaf-outline',
+] as const;
 
 export default function ScanPage() {
+  const { t } = useLanguage();
   const [cameraOpen, setCameraOpen] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
+
+  const tips = [
+    { id: 1, icon: TIP_ICONS[0], title: t.tipGoodLightingTitle, description: t.tipGoodLightingDesc },
+    { id: 2, icon: TIP_ICONS[1], title: t.tipFillFrameTitle,    description: t.tipFillFrameDesc },
+    { id: 3, icon: TIP_ICONS[2], title: t.tipAvoidShadowsTitle, description: t.tipAvoidShadowsDesc },
+    { id: 4, icon: TIP_ICONS[3], title: t.tipSingleLeafTitle,   description: t.tipSingleLeafDesc },
+  ];
 
   // ── Navigate to analysis with image URI ──────────────────────────────────
   const goToAnalysis = (uri: string) => {
@@ -60,10 +49,7 @@ export default function ScanPage() {
   const handleGallery = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert(
-        'Permission Required',
-        'Please allow gallery access to upload a photo.',
-      );
+      Alert.alert(t.permissionRequired, t.galleryPermissionMsg);
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -82,10 +68,7 @@ export default function ScanPage() {
     if (!permission?.granted) {
       const { granted } = await requestPermission();
       if (!granted) {
-        Alert.alert(
-          'Camera Permission',
-          'Camera access is required to snap a photo.',
-        );
+        Alert.alert(t.cameraPermission, t.cameraPermissionMsg);
         return;
       }
     }
@@ -100,7 +83,7 @@ export default function ScanPage() {
       setCameraOpen(false);
       if (photo?.uri) goToAnalysis(photo.uri);
     } catch {
-      Alert.alert('Error', 'Failed to take photo. Please try again.');
+      Alert.alert('Error', t.photoError);
     }
   };
 
@@ -119,7 +102,7 @@ export default function ScanPage() {
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <Ionicons name="leaf" size={18} color="#1e5b43" />
-          <Text style={styles.headerTitle}>Scan Leaf</Text>
+          <Text style={styles.headerTitle}>{t.scanPageTitle}</Text>
         </View>
         <View style={styles.headerSpacer} />
       </View>
@@ -132,10 +115,8 @@ export default function ScanPage() {
         {/* ── Hero Banner ── */}
         <View style={styles.heroBanner}>
           <View style={styles.heroTextBlock}>
-            <Text style={styles.heroTitle}>Scan Your Leaf</Text>
-            <Text style={styles.heroSubtitle}>
-              Point your camera at an infected leaf or upload a photo for instant AI diagnosis.
-            </Text>
+            <Text style={styles.heroTitle}>{t.scanHeroTitle}</Text>
+            <Text style={styles.heroSubtitle}>{t.scanHeroSubtitle}</Text>
           </View>
           <View style={styles.heroIconBox}>
             <Ionicons name="leaf" size={40} color="#a8e6cf" />
@@ -153,7 +134,7 @@ export default function ScanPage() {
           <View style={styles.cameraIconCircle}>
             <Ionicons name="camera" size={36} color="#1e5b43" />
           </View>
-          <Text style={styles.viewfinderHint}>Tap below to start scanning</Text>
+          <Text style={styles.viewfinderHint}>{t.scanViewfinderHint}</Text>
 
           <View style={styles.actionButtonsContainer}>
             <TouchableOpacity
@@ -162,7 +143,7 @@ export default function ScanPage() {
               onPress={handleEnableCamera}
             >
               <Ionicons name="camera" size={20} color="#ffffff" style={{ marginRight: 8 }} />
-              <Text style={styles.snapButtonText}>Snap Picture</Text>
+              <Text style={styles.snapButtonText}>{t.snapPicture}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -176,13 +157,13 @@ export default function ScanPage() {
                 color="#1e5b43"
                 style={{ marginRight: 8 }}
               />
-              <Text style={styles.galleryButtonText}>Upload from Gallery</Text>
+              <Text style={styles.galleryButtonText}>{t.uploadFromGallery}</Text>
             </TouchableOpacity>
           </View>
         </View>
 
         {/* ── Tips ── */}
-        <Text style={styles.tipsHeader}>Tips for Best Results</Text>
+        <Text style={styles.tipsHeader}>{t.tipsForBestResults}</Text>
         <View style={styles.tipsContainer}>
           {tips.map((tip) => (
             <View key={tip.id} style={styles.tipCard}>

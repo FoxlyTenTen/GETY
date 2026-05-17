@@ -1,6 +1,8 @@
+
 import { Tabs } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useLanguage } from '@/context/LanguageContext';
+
 
 export default function TabLayout() {
   const { t } = useLanguage();

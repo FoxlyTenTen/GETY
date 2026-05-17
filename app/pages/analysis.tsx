@@ -5,9 +5,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as Location from 'expo-location';
+import NetInfo from '@react-native-community/netinfo';
+import { scheduleStepNotifications } from '@/lib/notifications';
+import { useQueryClient } from '@tanstack/react-query';
 import { useScan, ScanResult, TreatmentStep } from '@/context/ScanContext';
 import { supabase } from '@/lib/supabase';
 import { useLanguage } from '@/context/LanguageContext';
+import { QUERY_KEYS } from '@/lib/queries';
+
+// Disease class labels returned by the /predict backend
+const CLASS_LABELS = ['Bird_Eye_Spot', 'Colletotrichum', 'Corynespora', 'Healthy', 'Leaf_Blight', 'Powdery_Mildew'];
 
 const COLORS = {
     primary: '#1e5b43',
@@ -146,7 +153,17 @@ export default function AnalysisPage() {
     const { imageUri } = useLocalSearchParams<{ imageUri: string }>();
     const { setCurrentScan, saveToHistory } = useScan();
     const { language, t } = useLanguage();
+    const queryClient = useQueryClient();
     const fallback = language === 'ms' ? STATIC_FALLBACK_MS : STATIC_FALLBACK;
+
+    // Connectivity state (null = still checking)
+    const [isOnline, setIsOnline] = useState<boolean | null>(null);
+
+    useEffect(() => {
+        NetInfo.fetch().then(s => setIsOnline(s.isConnected ?? false));
+        const unsub = NetInfo.addEventListener(s => setIsOnline(s.isConnected ?? false));
+        return unsub;
+    }, []);
 
     const [mockResult, setMockResult] = useState<ScanResult | null>(null);
     const [modelClass, setModelClass] = useState<string>('');
@@ -157,6 +174,8 @@ export default function AnalysisPage() {
     const [allProbabilities, setAllProbabilities] = useState<{ label: string; prob: number }[]>([]);
     const [convertingPlan, setConvertingPlan] = useState(false);
     const [saving, setSaving] = useState(false);
+    const [savedScanId, setSavedScanId] = useState<string | null>(null); // set after first Supabase save
+    const [savedTreeId, setSavedTreeId] = useState<string | null>(null);
     const [milestoneCache, setMilestoneCache] = useState<{ steps: TreatmentStep[]; expertTip?: string } | null>(null);
 
     const isUnreliable = (probs: Record<string, number>, topConf: number): boolean => {
@@ -184,40 +203,47 @@ export default function AnalysisPage() {
         location: '',
     });
 
+    // ── Phase A: Prediction — backend /predict endpoint ──────────────────────
     useEffect(() => {
         if (!imageUri) { setPredicting(false); return; }
+
         (async () => {
             try {
-                // ── Phase A: TFLite prediction ────────────────────────────
+                let cls: string;
+                let confidence: number;
+                let all_probabilities: Record<string, number>;
+
                 const formData = new FormData();
                 formData.append('file', { uri: imageUri, name: 'leaf.jpg', type: 'image/jpeg' } as any);
-
                 const res = await fetch(`${BACKEND_URL}/predict`, { method: 'POST', body: formData });
                 if (!res.ok) throw new Error(await res.text());
-
                 const json: { disease: string; confidence: number; all_probabilities: Record<string, number> } = await res.json();
+                cls = json.disease;
+                confidence = json.confidence;
+                all_probabilities = json.all_probabilities;
 
-                const ranked = Object.entries(json.all_probabilities)
-                    .map(([cls, prob]) => ({ label: fallback[cls]?.name ?? cls.replace(/_/g, ' '), prob }))
+                const ranked = CLASS_LABELS
+                    .map(lbl => ({ label: fallback[lbl]?.name ?? lbl.replace(/_/g, ' '), prob: all_probabilities[lbl] ?? 0 }))
                     .sort((a, b) => b.prob - a.prob);
                 setAllProbabilities(ranked);
 
-                if (isUnreliable(json.all_probabilities, json.confidence)) {
+                if (isUnreliable(all_probabilities, confidence)) {
                     setNotALeaf(true);
                     setPredicting(false);
                     return;
                 }
 
-                const cls = json.disease;
                 const staticData = fallback[cls] ?? fallback['Healthy'];
-                const confidencePct = Math.round(json.confidence * 100);
-
+                const confidencePct = Math.round(confidence * 100);
                 setModelClass(cls);
                 setMockResult(buildScanResult(staticData, confidencePct));
                 setPredicting(false);
 
-                // ── Phase B: RAG enrichment (background, non-blocking) ────
+                // ── Phase B: RAG enrichment (online only, non-blocking) ───
                 if (cls === 'Healthy') return;
+                const netState = await NetInfo.fetch();
+                if (!netState.isConnected) return; // skip RAG when offline
+
                 setRagLoading(true);
                 try {
                     const ragRes = await fetch(`${BACKEND_URL}/disease-info`, {
@@ -239,13 +265,12 @@ export default function AnalysisPage() {
                             dayPlan: rag.estimated_recovery_days ?? prev.dayPlan,
                             followUpDays: rag.follow_up_days ?? prev.followUpDays,
                         } : prev);
-                        // Update probability bar labels if disease name changed
                         setAllProbabilities(prev => prev.map(item =>
                             item.label === staticData.name || item.label === STATIC_FALLBACK[cls]?.name
                                 ? { ...item, label: rag.disease_name ?? item.label } : item
                         ));
                     }
-                } catch { /* silently keep static fallback */ } finally {
+                } catch { /* keep static fallback silently */ } finally {
                     setRagLoading(false);
                 }
             } catch (e: any) {
@@ -253,7 +278,7 @@ export default function AnalysisPage() {
                 setPredicting(false);
             }
         })();
-    }, []);
+    }, [imageUri]);
 
     // ── GPS State ────────────────────────────────────────────────────────────
     const [gpsLoading, setGpsLoading] = useState(false);
@@ -306,15 +331,15 @@ export default function AnalysisPage() {
     const handleConvertPlan = async () => {
         if (!mockResult) return;
 
-        // Use cached result if already generated
-        if (milestoneCache) {
-            setCurrentScan({ ...scanResult, treatmentSteps: milestoneCache.steps, expertTip: milestoneCache.expertTip });
-            router.push('/pages/treatment');
+        const netState = await NetInfo.fetch();
+        if (!netState.isConnected) {
+            Alert.alert('Offline', t.connectToSave);
             return;
         }
 
         setConvertingPlan(true);
         try {
+            // ── Step 1: Generate milestone steps ─────────────────────────
             let steps: TreatmentStep[] = buildFallbackSteps(mockResult.dayPlan);
             let expertTip: string | undefined;
 
@@ -340,150 +365,198 @@ export default function AnalysisPage() {
                 } catch { /* use fallback steps */ }
             }
 
+            // ── Step 2: Auth check ────────────────────────────────────────
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) { Alert.alert(t.notSignedIn, t.pleaseSignIn); return; }
+
+            const treeLabel = locationLabel.trim() || scanAddress || 'Unknown Plot';
+
+            // ── Step 3: Find or create tree (reuse if already saved) ──────
+            let treeId: string | null = savedTreeId;
+            if (!treeId) {
+                const { data: existingTree } = await supabase
+                    .from('trees').select('id')
+                    .eq('user_uid', user.id).eq('label_name', treeLabel).maybeSingle();
+                if (existingTree) {
+                    treeId = existingTree.id;
+                } else {
+                    const { data: newTree, error: treeErr } = await supabase
+                        .from('trees')
+                        .insert({ user_uid: user.id, label_name: treeLabel, latitude: scanLat ?? null, longitude: scanLng ?? null })
+                        .select('id').single();
+                    if (treeErr || !newTree) throw new Error(treeErr?.message ?? 'Tree insert failed');
+                    treeId = newTree.id;
+                }
+                setSavedTreeId(treeId);
+            }
+
+            // ── Step 4: Reuse existing scan or insert new one ─────────────
+            let scanId = savedScanId;
+            if (!scanId) {
+                const recommendationJson = {
+                    what_to_do_next: scanResult.whatToDo,
+                    keep_your_farm_safe: scanResult.fungicideTips,
+                    follow_up_action: `Scan these trees again in ${scanResult.followUpDays} days to monitor healing progress.`,
+                };
+                const { data: scan, error: scanErr } = await supabase
+                    .from('scans')
+                    .insert({
+                        tree_id: treeId,
+                        disease_name: scanResult.diseaseName,
+                        disease_description: scanResult.description,
+                        image_url: imageUri || null,
+                        recommendation_json: recommendationJson,
+                        confidence_score: scanResult.confidence,
+                        risk_level: scanResult.risk.toLowerCase() as 'low' | 'medium' | 'high',
+                        follow_up_days: scanResult.followUpDays,
+                        model_version: 'v1',
+                        status: 'converted_to_plan',
+                    })
+                    .select('id').single();
+                if (scanErr || !scan) throw new Error(scanErr?.message ?? 'Scan insert failed');
+                scanId = scan.id;
+                setSavedScanId(scanId);
+            } else {
+                // Update existing scan status to converted_to_plan
+                await supabase.from('scans').update({ status: 'converted_to_plan' }).eq('id', scanId);
+            }
+
+            // ── Step 5: Insert treatment plan ─────────────────────────────
+            const expertTipText = expertTip
+                ?? `Apply ${scanResult.fungicide} (${scanResult.waterMix}) and re-scan in ${scanResult.followUpDays} days.`;
+
+            const { data: plan, error: planErr } = await supabase
+                .from('treatment_plans')
+                .insert({
+                    scan_id: scanId,
+                    tree_id: treeId,
+                    title: `${scanResult.diseaseName} Treatment`,
+                    disease_name: scanResult.diseaseName,
+                    estimated_recovery_days: scanResult.dayPlan,
+                    overall_progress: 0,
+                    status: 'active',
+                    expert_tip: expertTipText,
+                    recommended_fungicide: scanResult.fungicide ?? null,
+                    water_mix_ratio: scanResult.waterMix ?? null,
+                })
+                .select('id').single();
+            if (planErr || !plan) throw new Error(planErr?.message ?? 'Plan insert failed');
+
+            // ── Step 6: Insert steps ──────────────────────────────────────
+            const stepStatusMap: Record<string, string> = { current: 'ongoing', upcoming: 'upcoming', completed: 'completed' };
+            const totalSteps = steps.length;
+            const stepsToInsert = steps.map((step, i) => {
+                const offsetDays = step.dayOffset ?? Math.round(i * scanResult.dayPlan / Math.max(totalSteps - 1, 1));
+                return {
+                    treatment_plan_id: plan.id,
+                    step_order: i + 1,
+                    title: step.title,
+                    description: step.desc,
+                    status: stepStatusMap[step.status] ?? 'upcoming',
+                    due_date: new Date(Date.now() + offsetDays * 864e5).toISOString(),
+                };
+            });
+
+            const { error: stepsErr } = await supabase.from('treatment_plan_steps').insert(stepsToInsert);
+            if (stepsErr) throw new Error(stepsErr?.message ?? 'Steps insert failed');
+
+            scheduleStepNotifications(
+                stepsToInsert.map((s, i) => ({ id: `${plan.id}-step-${i}`, title: s.title, due_date: s.due_date ?? null })),
+                `${scanResult.diseaseName} Treatment`,
+                treeLabel,
+            ).catch(() => {});
+
+            queryClient.invalidateQueries({ queryKey: QUERY_KEYS.history(user.id) });
+            queryClient.invalidateQueries({ queryKey: QUERY_KEYS.plans(user.id) });
+            queryClient.invalidateQueries({ queryKey: QUERY_KEYS.homeData(user.id) });
+
             setMilestoneCache({ steps, expertTip });
             setCurrentScan({ ...scanResult, treatmentSteps: steps, expertTip });
+
             router.push('/pages/treatment');
+        } catch (e: any) {
+            Alert.alert(t.saveFailed, `Error: ${e?.message ?? 'Unknown error'}`);
         } finally {
             setConvertingPlan(false);
         }
     };
 
+    // Save scan only (no treatment plan) — use "Convert to Milestone" to save with a plan
     const handleSaveReport = async () => {
         if (!mockResult) return;
+
+        const netState = await NetInfo.fetch();
+        if (!netState.isConnected) {
+            Alert.alert('Offline', t.connectToSave);
+            return;
+        }
+
         setSaving(true);
         try {
-            // ── Step 1: Check auth session ────────────────────────────────
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) {
                 Alert.alert(t.notSignedIn, t.pleaseSignIn);
-                setSaving(false);
                 return;
             }
 
             const treeLabel = locationLabel.trim() || scanAddress || 'Unknown Plot';
 
-            // ── Step 2: Find or create tree ───────────────────────────────
-            let treeId: string | null = null;
-            const { data: existingTree } = await supabase
-                .from('trees')
-                .select('id')
-                .eq('user_uid', user.id)
-                .eq('label_name', treeLabel)
-                .maybeSingle();
-
-            if (existingTree) {
-                treeId = existingTree.id;
-                console.log('[save] reusing tree:', treeId);
-            } else {
-                const { data: newTree, error: treeErr } = await supabase
-                    .from('trees')
-                    .insert({
-                        user_uid: user.id,
-                        label_name: treeLabel,
-                        latitude: scanLat ?? null,
-                        longitude: scanLng ?? null,
-                    })
-                    .select('id')
-                    .single();
-                if (treeErr || !newTree) throw new Error(treeErr?.message ?? 'Tree insert failed');
-                treeId = newTree.id;
-                console.log('[save] created tree:', treeId);
+            // Reuse tree if already saved from a previous action
+            let treeId: string | null = savedTreeId;
+            if (!treeId) {
+                const { data: existingTree } = await supabase
+                    .from('trees').select('id')
+                    .eq('user_uid', user.id).eq('label_name', treeLabel).maybeSingle();
+                if (existingTree) {
+                    treeId = existingTree.id;
+                } else {
+                    const { data: newTree, error: treeErr } = await supabase
+                        .from('trees')
+                        .insert({ user_uid: user.id, label_name: treeLabel, latitude: scanLat ?? null, longitude: scanLng ?? null })
+                        .select('id').single();
+                    if (treeErr || !newTree) throw new Error(treeErr?.message ?? 'Tree insert failed');
+                    treeId = newTree.id;
+                }
+                setSavedTreeId(treeId);
             }
 
-            // ── Step 3: Build recommendation_json (matches DB schema) ─────
-            const recommendationJson = {
-                what_to_do_next: scanResult.whatToDo,
-                keep_your_farm_safe: scanResult.fungicideTips,
-                follow_up_action: `Scan these trees again in ${scanResult.followUpDays} days to monitor healing progress.`,
-            };
-
-            // ── Step 4: Insert scan ───────────────────────────────────────
-            const { data: scan, error: scanErr } = await supabase
-                .from('scans')
-                .insert({
-                    tree_id: treeId,
-                    disease_name: scanResult.diseaseName,
-                    disease_description: scanResult.description,
-                    image_url: imageUri || null,
-                    recommendation_json: recommendationJson,
-                    confidence_score: scanResult.confidence,
-                    risk_level: scanResult.risk.toLowerCase() as 'low' | 'medium' | 'high',
-                    follow_up_days: scanResult.followUpDays,
-                    model_version: 'best_float32-tflite-v1',
-                    status: modelClass === 'Healthy' ? 'new' : 'converted_to_plan',
-                })
-                .select('id')
-                .single();
-            if (scanErr || !scan) throw new Error(scanErr?.message ?? 'Scan insert failed');
-            console.log('[save] scan inserted:', scan.id);
-
-            // ── Steps 5 & 6: Treatment plan — skip entirely for Healthy scans ──
-            if (modelClass && modelClass !== 'Healthy') {
-                const stepsSource = milestoneCache?.steps ?? scanResult.treatmentSteps;
-                const expertTipText = milestoneCache?.expertTip
-                    ?? scanResult.expertTip
-                    ?? `Apply ${scanResult.fungicide} (${scanResult.waterMix}) and re-scan in ${scanResult.followUpDays} days.`;
-
-                const { data: plan, error: planErr } = await supabase
-                    .from('treatment_plans')
+            // Only insert scan if not already saved
+            if (!savedScanId) {
+                const recommendationJson = {
+                    what_to_do_next: scanResult.whatToDo,
+                    keep_your_farm_safe: scanResult.fungicideTips,
+                    follow_up_action: `Scan these trees again in ${scanResult.followUpDays} days to monitor healing progress.`,
+                };
+                const { data: scan, error: scanErr } = await supabase
+                    .from('scans')
                     .insert({
-                        scan_id: scan.id,
                         tree_id: treeId,
-                        title: `${scanResult.diseaseName} Treatment`,
                         disease_name: scanResult.diseaseName,
-                        estimated_recovery_days: scanResult.dayPlan,
-                        overall_progress: 0,
-                        status: 'active',
-                        expert_tip: expertTipText,
-                        recommended_fungicide: scanResult.fungicide ?? null,
-                        water_mix_ratio: scanResult.waterMix ?? null,
+                        disease_description: scanResult.description,
+                        image_url: imageUri || null,
+                        recommendation_json: recommendationJson,
+                        confidence_score: scanResult.confidence,
+                        risk_level: scanResult.risk.toLowerCase() as 'low' | 'medium' | 'high',
+                        follow_up_days: scanResult.followUpDays,
+                        model_version: 'v1',
+                        status: 'new',
                     })
-                    .select('id')
-                    .single();
-                if (planErr || !plan) throw new Error(planErr?.message ?? 'Plan insert failed');
-                console.log('[save] plan inserted:', plan.id);
-
-                const stepStatusMap: Record<string, string> = { current: 'ongoing', upcoming: 'upcoming', completed: 'completed' };
-                const totalSteps = stepsSource.length;
-                const stepsToInsert = stepsSource.map((step, i) => {
-                    const offsetDays = step.dayOffset
-                        ?? Math.round(i * scanResult.dayPlan / Math.max(totalSteps - 1, 1));
-                    return {
-                        treatment_plan_id: plan.id,
-                        step_order: i + 1,
-                        title: step.title,
-                        description: step.desc,
-                        status: stepStatusMap[step.status] ?? 'upcoming',
-                        due_date: new Date(Date.now() + offsetDays * 864e5).toISOString(),
-                    };
-                });
-
-                const { error: stepsErr } = await supabase.from('treatment_plan_steps').insert(stepsToInsert);
-                if (stepsErr) throw new Error(stepsErr?.message ?? 'Steps insert failed');
-                console.log('[save] steps inserted');
+                    .select('id').single();
+                if (scanErr || !scan) throw new Error(scanErr?.message ?? 'Scan insert failed');
+                setSavedScanId(scan.id);
             }
 
-            // ── Step 7: Save locally to ScanContext too ───────────────────
             setCurrentScan(scanResult);
             saveToHistory(scanResult);
+            queryClient.invalidateQueries({ queryKey: QUERY_KEYS.history(user.id) });
+            queryClient.invalidateQueries({ queryKey: QUERY_KEYS.homeData(user.id) });
 
             Alert.alert(
                 t.reportSavedTitle,
                 t.reportSavedMsg(scanResult.diseaseName, treeLabel),
-                [
-                    {
-                        text: t.viewMilestones,
-                        onPress: () => router.replace('/(tabs)/milestone' as any),
-                    },
-                    {
-                        text: t.goHome,
-                        style: 'cancel',
-                        onPress: () => router.replace('/' as any),
-                    },
-                ]
+                [{ text: t.goHome, style: 'cancel', onPress: () => router.replace('/' as any) }]
             );
         } catch (e: any) {
-            console.error('[save] error:', e?.message ?? e);
             Alert.alert(t.saveFailed, `Error: ${e?.message ?? 'Unknown error'}`);
         } finally {
             setSaving(false);
@@ -492,9 +565,9 @@ export default function AnalysisPage() {
 
     if (predicting) {
         return (
-            <SafeAreaView style={[styles.safeArea, { alignItems: 'center', justifyContent: 'center', gap: 16 }]}>
+            <SafeAreaView style={[styles.safeArea, { alignItems: 'center', justifyContent: 'center', gap: 16, padding: 32 }]}>
                 <ActivityIndicator size="large" color={COLORS.primary} />
-                <Text style={{ color: COLORS.textMuted, fontSize: 15 }}>{t.analysingLeaf}</Text>
+                <Text style={{ color: COLORS.textMuted, fontSize: 15, textAlign: 'center' }}>{t.analysingLeaf}</Text>
             </SafeAreaView>
         );
     }
@@ -613,6 +686,14 @@ export default function AnalysisPage() {
                     <Text style={styles.dangerBadgeText}>{t.foundBadge(scanResult.diseaseName)}</Text>
                 </View>
 
+                {/* ── Offline Banner ── */}
+                {isOnline === false && (
+                    <View style={styles.offlineBanner}>
+                        <Ionicons name="cloud-offline-outline" size={18} color="#92400e" />
+                        <Text style={styles.offlineBannerText}>{t.offlineBanner}</Text>
+                    </View>
+                )}
+
                 {/* Section 1: What disease is this? */}
                 <View style={styles.card}>
                     <View style={styles.cardHeader}>
@@ -667,14 +748,18 @@ export default function AnalysisPage() {
                     </View>
                 )}
 
-                {/* Sections 2–4: show loading state while RAG is fetching */}
+                {/* Sections 2–4: loading / offline / loaded states */}
                 {ragLoading ? (
                     <View style={{ backgroundColor: '#f0fdf4', borderRadius: 18, padding: 28, alignItems: 'center', gap: 14, marginBottom: 16 }}>
                         <ActivityIndicator size="large" color={COLORS.primary} />
                         <Text style={{ fontSize: 15, fontWeight: '700', color: COLORS.primary }}>{t.analysingWithAI}</Text>
-                        <Text style={{ fontSize: 13, color: '#4b7c5e', textAlign: 'center' }}>
-                            {t.analysingWithAIDesc}
-                        </Text>
+                        <Text style={{ fontSize: 13, color: '#4b7c5e', textAlign: 'center' }}>{t.analysingWithAIDesc}</Text>
+                    </View>
+                ) : isOnline === false ? (
+                    /* Offline: show local-data note instead of full RAG sections */
+                    <View style={styles.offlineRagCard}>
+                        <Ionicons name="information-circle-outline" size={20} color="#1e5b43" style={{ marginBottom: 6 }} />
+                        <Text style={styles.offlineRagText}>{t.offlineRagNote}</Text>
                     </View>
                 ) : (
                     <>
@@ -848,16 +933,28 @@ export default function AnalysisPage() {
 
                 {/* Action Buttons */}
                 {modelClass !== 'Healthy' && (
-                    <TouchableOpacity style={[styles.primaryBtn, convertingPlan && { opacity: 0.75 }]} onPress={handleConvertPlan} activeOpacity={0.9} disabled={convertingPlan}>
+                    <TouchableOpacity
+                        style={[styles.primaryBtn, convertingPlan && { opacity: 0.75 }]}
+                        onPress={handleConvertPlan}
+                        activeOpacity={0.9}
+                        disabled={convertingPlan}
+                    >
                         {convertingPlan
                             ? <ActivityIndicator size="small" color="#fff" />
                             : <MaterialCommunityIcons name="playlist-edit" size={24} color="#fff" />}
-                        <Text style={styles.primaryBtnText}>{convertingPlan ? t.generatingPlan : t.convertToMilestone}</Text>
+                        <Text style={styles.primaryBtnText}>
+                            {convertingPlan ? t.generatingPlan : t.convertToMilestone}
+                        </Text>
                     </TouchableOpacity>
                 )}
 
                 <View style={styles.secondaryBtnRow}>
-                    <TouchableOpacity style={[styles.secondaryBtn, { backgroundColor: COLORS.iconBgOrange }]} onPress={handleSaveReport} activeOpacity={0.8} disabled={saving}>
+                    <TouchableOpacity
+                        style={[styles.secondaryBtn, { backgroundColor: COLORS.iconBgOrange }, (saving || isOnline === false) && { opacity: 0.5 }]}
+                        onPress={handleSaveReport}
+                        activeOpacity={0.8}
+                        disabled={saving || isOnline === false}
+                    >
                         <MaterialCommunityIcons name="bookmark" size={18} color={COLORS.orangeText} />
                         <Text style={[styles.secondaryBtnText, { color: COLORS.orangeText }]}>
                             {saving ? t.saving : t.saveReport}
@@ -1216,6 +1313,40 @@ const styles = StyleSheet.create({
         marginTop: 4,
     },
     gpsRetapText: { fontSize: 13, fontWeight: '700', color: COLORS.primary },
+
+    // Offline banner
+    offlineBanner: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 10,
+        backgroundColor: '#fef3c7',
+        borderRadius: 16,
+        padding: 16,
+        marginBottom: 16,
+        borderWidth: 1,
+        borderColor: '#fcd34d',
+    },
+    offlineBannerText: {
+        flex: 1,
+        fontSize: 13,
+        color: '#92400e',
+        fontWeight: '600',
+        lineHeight: 18,
+    },
+    offlineRagCard: {
+        alignItems: 'center',
+        backgroundColor: '#f0fdf4',
+        borderRadius: 18,
+        padding: 24,
+        marginBottom: 16,
+        gap: 4,
+    },
+    offlineRagText: {
+        fontSize: 13,
+        color: '#4b7c5e',
+        textAlign: 'center',
+        lineHeight: 20,
+    },
 
     // Plot label input card
     labelCard: {

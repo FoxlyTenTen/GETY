@@ -141,6 +141,21 @@ export default function TreatmentPage() {
                     </View>
                 </View>
 
+                {/* Saved confirmation + navigate to milestones */}
+                <View style={styles.savedBanner}>
+                    <Ionicons name="checkmark-circle" size={18} color="#166534" />
+                    <Text style={styles.savedBannerText}>{t.planSavedToSupabase ?? 'Plan saved to your account'}</Text>
+                </View>
+
+                <TouchableOpacity
+                    style={styles.viewMilestonesBtn}
+                    onPress={() => router.replace('/(tabs)/milestone' as any)}
+                    activeOpacity={0.88}
+                >
+                    <MaterialCommunityIcons name="flag-checkered" size={20} color="#fff" />
+                    <Text style={styles.viewMilestonesBtnText}>{t.viewMilestones ?? 'View in Milestones'}</Text>
+                </TouchableOpacity>
+
                 <View style={{ height: 40 }} />
             </ScrollView>
         </SafeAreaView>
@@ -210,6 +225,18 @@ const styles = StyleSheet.create({
     statusBadgeUpcoming: { backgroundColor: '#f3f4f6', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
     statusTextUpcoming: { color: '#6b7280', fontSize: 9, fontWeight: '800' },
     upcomingDesc: { fontSize: 13, color: '#6b7280', lineHeight: 18 },
+    savedBanner: {
+        flexDirection: 'row', alignItems: 'center', gap: 8,
+        backgroundColor: '#dcfce7', borderRadius: 16, padding: 14,
+        marginBottom: 14, borderWidth: 1, borderColor: '#bbf7d0',
+    },
+    savedBannerText: { fontSize: 13, fontWeight: '700', color: '#166534', flex: 1 },
+    viewMilestonesBtn: {
+        backgroundColor: '#235e45', flexDirection: 'row', alignItems: 'center',
+        justifyContent: 'center', paddingVertical: 18, borderRadius: 30,
+        gap: 10, marginBottom: 16,
+    },
+    viewMilestonesBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
     expertTipCard: {
         backgroundColor: '#f4e4d0', borderRadius: 30, padding: 24,
         flexDirection: 'row', gap: 16, alignItems: 'flex-start',

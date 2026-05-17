@@ -8,33 +8,14 @@ import { StatusBar } from 'expo-status-bar';
 import { router, useFocusEffect } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { useQuery } from '@tanstack/react-query';
 import AppHeader from '@/components/common/AppHeader';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
+import { QUERY_KEYS, fetchHomeData, HomeData } from '@/lib/queries';
 
 const { width } = Dimensions.get('window');
-
-// ─── Types ─────────────────────────────────────────────────────────────────────
-
-type HomeData = {
-    userName: string;
-    latestScan: {
-        disease_name: string;
-        scanned_at: string;
-        risk_level: 'low' | 'medium' | 'high';
-        tree_label: string;
-    } | null;
-    totalScans: number;
-    highRiskScan: {
-        disease_name: string;
-        tree_label: string;
-    } | null;
-    currentStep: {
-        title: string;
-        due_date: string | null;
-    } | null;
-};
 
 function formatDate(iso: string) {
     return new Date(iso).toLocaleDateString('en-MY', {
@@ -51,101 +32,24 @@ function formatDue(iso: string | null) {
 export default function Index() {
     const { isAdmin } = useAuth();
     const { t } = useLanguage();
-    const [data, setData]           = useState<HomeData | null>(null);
-    const [loading, setLoading]     = useState(true);
     const [alertDismissed, setAlertDismissed] = useState(false);
+    const [userId, setUserId] = useState<string | null>(null);
 
-    const load = useCallback(async () => {
-        try {
-            // Step 1: Get current user + their profile name
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) { setData(null); setLoading(false); return; }
-
-            const { data: profile } = await supabase
-                .from('users')
-                .select('full_name')
-                .eq('id', user.id)
-                .maybeSingle();
-
-            const userName = profile?.full_name || user.email?.split('@')[0] || 'Farmer';
-
-            // Step 2: Get all tree IDs for this user
-            const { data: userTrees } = await supabase
-                .from('trees')
-                .select('id, label_name')
-                .eq('user_uid', user.id);
-
-            const treeIds = (userTrees ?? []).map((t: { id: string }) => t.id);
-
-            if (treeIds.length === 0) {
-                setData({ userName, latestScan: null, totalScans: 0, highRiskScan: null, currentStep: null });
-                setLoading(false);
-                return;
-            }
-
-            // Build a label map: id → label_name
-            const treeLabels: Record<string, string> = {};
-            (userTrees ?? []).forEach((t: { id: string; label_name: string }) => {
-                treeLabels[t.id] = t.label_name;
-            });
-
-            // Step 3: Fetch scans for those trees (latest first)
-            const { data: scans } = await supabase
-                .from('scans')
-                .select('id, disease_name, scanned_at, risk_level, tree_id')
-                .in('tree_id', treeIds)
-                .order('scanned_at', { ascending: false });
-
-            const totalScans = scans?.length ?? 0;
-            const latest = scans?.[0] ?? null;
-            const highRisk = scans?.find(s => s.risk_level === 'high') ?? null;
-
-            // Step 4: Fetch the current ongoing milestone step (from active treatment plans)
-            const { data: ongoingStep } = await supabase
-                .from('treatment_plan_steps')
-                .select(`
-                    id, title, due_date,
-                    treatment_plan:treatment_plans!inner (
-                        id, status, tree_id
-                    )
-                `)
-                .eq('status', 'ongoing')
-                .in('treatment_plans.tree_id', treeIds)
-                .limit(1)
-                .maybeSingle();
-
-            setData({
-                userName,
-                latestScan: latest ? {
-                    disease_name: latest.disease_name,
-                    scanned_at: latest.scanned_at,
-                    risk_level: latest.risk_level,
-                    tree_label: treeLabels[latest.tree_id] || 'Unknown Plot',
-                } : null,
-                totalScans,
-                highRiskScan: highRisk ? {
-                    disease_name: highRisk.disease_name,
-                    tree_label: treeLabels[highRisk.tree_id] || 'Unknown Plot',
-                } : null,
-                currentStep: ongoingStep ? {
-                    title: ongoingStep.title,
-                    due_date: ongoingStep.due_date,
-                } : null,
-            });
-        } catch (e: any) {
-            console.error('[home] fetch error:', e?.message ?? e);
-            setData(null);
-        } finally {
-            setLoading(false);
-        }
+    // Resolve user ID once on mount
+    React.useEffect(() => {
+        supabase.auth.getUser().then(({ data: { user } }) => setUserId(user?.id ?? null));
     }, []);
 
-    // Reload every time home tab comes into focus
+    const { data, isLoading: loading, refetch } = useQuery({
+        queryKey: QUERY_KEYS.homeData(userId ?? ''),
+        queryFn: () => fetchHomeData(userId!),
+        enabled: !!userId,
+    });
+
     useFocusEffect(useCallback(() => {
-        setLoading(true);
         setAlertDismissed(false);
-        load();
-    }, [load]));
+        refetch();
+    }, [refetch]));
 
     // ── Loading skeleton ───────────────────────────────────────────────────────
     if (loading) {

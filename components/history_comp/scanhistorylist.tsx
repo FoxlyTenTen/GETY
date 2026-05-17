@@ -1,12 +1,14 @@
 import React, { useState, useCallback } from 'react';
 import {
     View, Text, StyleSheet, TouchableOpacity, Image,
-    ActivityIndicator,
+    ActivityIndicator, Alert,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import { QUERY_KEYS, fetchHistory } from '@/lib/queries';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -97,91 +99,53 @@ function groupScans(scans: DbScan[]) {
 
 export default function ScanHistoryList() {
     const router = useRouter();
-    const [scans, setScans] = useState<DbScan[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [refreshing, setRefreshing] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+    const queryClient = useQueryClient();
+    const [userId, setUserId] = useState<string | null>(null);
 
-    const load = useCallback(async () => {
-        setError(null);
-        try {
-            // Step 1: Get the current logged-in user
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) {
-                setScans([]);
-                setLoading(false);
-                setRefreshing(false);
-                return;
-            }
-
-            // Step 2: Get ALL tree IDs that belong to this user
-            // .eq() on a direct column is always reliable
-            const { data: userTrees, error: treeErr } = await supabase
-                .from('trees')
-                .select('id')
-                .eq('user_uid', user.id);
-
-            if (treeErr) throw treeErr;
-            const treeIds = (userTrees ?? []).map((t: { id: string }) => t.id);
-
-            if (treeIds.length === 0) {
-                // User has no trees yet → no scans
-                setScans([]);
-                setLoading(false);
-                setRefreshing(false);
-                return;
-            }
-
-            // Step 3: Fetch ALL scans for those trees
-            // .in('tree_id', treeIds) reliably returns every matching row
-            const { data, error: fetchErr } = await supabase
-                .from('scans')
-                .select(`
-                    id,
-                    disease_name,
-                    confidence_score,
-                    risk_level,
-                    image_url,
-                    follow_up_days,
-                    scanned_at,
-                    recommendation_json,
-                    tree:trees (
-                        id, label_name, latitude, longitude
-                    ),
-                    treatment_plans (
-                        id, overall_progress, expert_tip,
-                        treatment_plan_steps (
-                            id, step_order, title, status
-                        )
-                    )
-                `)
-                .in('tree_id', treeIds)
-                .order('scanned_at', { ascending: false });
-
-            if (fetchErr) throw fetchErr;
-            setScans((data as unknown as DbScan[]) ?? []);
-        } catch (e: any) {
-            console.error('[history] fetch error:', e?.message ?? e);
-            setError(e?.message ?? 'Failed to load history');
-        } finally {
-            setLoading(false);
-            setRefreshing(false);
-        }
+    React.useEffect(() => {
+        supabase.auth.getUser().then(({ data: { user } }) => setUserId(user?.id ?? null));
     }, []);
 
-    // Reload every time the History tab comes into focus
-    useFocusEffect(useCallback(() => {
-        setLoading(true);
-        load();
-    }, [load]));
+    const { data: scans = [], isLoading: loading, error: queryError, refetch } = useQuery({
+        queryKey: QUERY_KEYS.history(userId ?? ''),
+        queryFn: () => fetchHistory(userId!),
+        enabled: !!userId,
+    });
 
-    const onRefresh = () => { setRefreshing(true); load(); };
+    const error = queryError ? (queryError as Error).message : null;
+
+    useFocusEffect(useCallback(() => {
+        refetch();
+    }, [refetch]));
+
+    const onRefresh = () => { refetch(); };
 
     const handlePress = (item: DbScan) => {
         router.push({
             pathname: '/pages/detail_history' as any,
             params: { scanId: item.id },
         });
+    };
+
+    const handleDelete = (item: DbScan) => {
+        Alert.alert(
+            'Delete Scan Record',
+            `Remove "${item.disease_name}" scan? Milestone plans linked to this scan will not be affected.`,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Delete', style: 'destructive',
+                    onPress: async () => {
+                        const { error } = await supabase.from('scans').delete().eq('id', item.id);
+                        if (error) { Alert.alert('Error', error.message); return; }
+                        if (userId) {
+                            queryClient.invalidateQueries({ queryKey: QUERY_KEYS.history(userId) });
+                            queryClient.invalidateQueries({ queryKey: QUERY_KEYS.homeData(userId) });
+                        }
+                    },
+                },
+            ]
+        );
     };
 
     // ── Loading ────────────────────────────────────────────────────────────────
@@ -201,7 +165,7 @@ export default function ScanHistoryList() {
                 <Ionicons name="cloud-offline-outline" size={48} color="#d1d5db" />
                 <Text style={styles.emptyTitle}>Could not load history</Text>
                 <Text style={styles.emptyText}>{error}</Text>
-                <TouchableOpacity onPress={load} style={styles.retryBtn}>
+                <TouchableOpacity onPress={() => refetch()} style={styles.retryBtn}>
                     <Text style={styles.retryText}>Retry</Text>
                 </TouchableOpacity>
             </View>
@@ -230,7 +194,7 @@ export default function ScanHistoryList() {
                     <Text style={styles.sectionHeader}>{group.label}</Text>
                     <View style={styles.groupList}>
                         {group.items.map(item => (
-                            <ScanCard key={item.id} item={item} onPress={() => handlePress(item)} />
+                            <ScanCard key={item.id} item={item} onPress={() => handlePress(item)} onDelete={() => handleDelete(item)} />
                         ))}
                     </View>
                 </View>
@@ -241,7 +205,7 @@ export default function ScanHistoryList() {
 
 // ─── Scan Card ──────────────────────────────────────────────────────────────────
 
-function ScanCard({ item, onPress }: { item: DbScan; onPress: () => void }) {
+function ScanCard({ item, onPress, onDelete }: { item: DbScan; onPress: () => void; onDelete: () => void }) {
     const plan = item.treatment_plans?.[0];
     const steps = (plan?.treatment_plan_steps ?? [])
         .sort((a, b) => a.step_order - b.step_order);
@@ -293,6 +257,13 @@ function ScanCard({ item, onPress }: { item: DbScan; onPress: () => void }) {
                     <View style={styles.confPill}>
                         <Text style={styles.confText}>{item.confidence_score}%</Text>
                     </View>
+                    <TouchableOpacity
+                        onPress={(e) => { e.stopPropagation(); onDelete(); }}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        style={styles.deleteBtn}
+                    >
+                        <Ionicons name="trash-outline" size={14} color="#ef4444" />
+                    </TouchableOpacity>
                 </View>
 
                 {/* Confidence bar */}
@@ -408,4 +379,9 @@ const styles = StyleSheet.create({
     },
     fungText: { fontSize: 11, color: COLORS.primary, fontWeight: '700' },
     chevron: { alignSelf: 'center', paddingHorizontal: 10 },
+    deleteBtn: {
+        backgroundColor: '#fee2e2', borderRadius: 8,
+        padding: 5, alignItems: 'center', justifyContent: 'center',
+        marginLeft: 4,
+    },
 });

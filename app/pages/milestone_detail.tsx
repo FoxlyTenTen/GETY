@@ -6,45 +6,15 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useLanguage } from '@/context/LanguageContext';
+import { QUERY_KEYS, fetchPlanDetail, DetailDbPlan, DetailDbStep } from '@/lib/queries';
 
-// ─── Types ─────────────────────────────────────────────────────────────────────
+// ─── Types (re-exported from queries.ts) ───────────────────────────────────────
 
-type DbStep = {
-    id: string;
-    step_order: number;
-    title: string;
-    description: string | null;
-    status: 'locked' | 'upcoming' | 'ongoing' | 'completed';
-    due_date: string | null;
-    completed_at: string | null;
-};
-
-type DbPlan = {
-    id: string;
-    title: string;
-    overall_progress: number;
-    estimated_recovery_days: number;
-    recommended_fungicide: string | null;
-    water_mix_ratio: string | null;
-    expert_tip: string | null;
-    status: 'active' | 'completed' | 'cancelled';
-    treatment_plan_steps: DbStep[];
-    scan: {
-        id: string;
-        disease_name: string;
-        risk_level: 'low' | 'medium' | 'high';
-        confidence_score: number;
-        scanned_at: string;
-    } | null;
-    tree: {
-        id: string;
-        label_name: string;
-        latitude: number | null;
-        longitude: number | null;
-    } | null;
-};
+type DbStep = DetailDbStep;
+type DbPlan = DetailDbPlan;
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -65,57 +35,16 @@ function formatDue(iso: string | null) {
 export default function MilestoneDetailPage() {
     const { scanId } = useLocalSearchParams<{ scanId: string }>();
     const { t } = useLanguage();
-
-    const [plan, setPlan]           = useState<DbPlan | null>(null);
-    const [loading, setLoading]     = useState(true);
-    const [error, setError]         = useState<string | null>(null);
+    const queryClient = useQueryClient();
     const [updatingStepId, setUpdatingStepId] = useState<string | null>(null);
 
-    useEffect(() => {
-        if (!scanId) { setError('No scan ID provided'); setLoading(false); return; }
-        fetchPlan();
-    }, [scanId]);
+    const { data: plan, isLoading: loading, error: queryError, refetch } = useQuery({
+        queryKey: QUERY_KEYS.planDetail(scanId ?? ''),
+        queryFn: () => fetchPlanDetail(scanId!),
+        enabled: !!scanId,
+    });
 
-    const fetchPlan = async () => {
-        setLoading(true);
-        setError(null);
-        try {
-            // Query FROM treatment_plans WHERE scan_id = scanId
-            // This is the reliable direction — treatment_plans.scan_id is a direct FK
-            const { data, error: fetchErr } = await supabase
-                .from('treatment_plans')
-                .select(`
-                    id,
-                    title,
-                    overall_progress,
-                    estimated_recovery_days,
-                    recommended_fungicide,
-                    water_mix_ratio,
-                    expert_tip,
-                    status,
-                    treatment_plan_steps (
-                        id, step_order, title, description,
-                        status, due_date, completed_at
-                    ),
-                    scan:scans (
-                        id, disease_name, risk_level, confidence_score, scanned_at
-                    ),
-                    tree:trees (
-                        id, label_name, latitude, longitude
-                    )
-                `)
-                .eq('scan_id', scanId)
-                .single();
-
-            if (fetchErr) throw fetchErr;
-            setPlan(data as unknown as DbPlan);
-        } catch (e: any) {
-            console.error('[milestone_detail] fetch error:', e?.message ?? e);
-            setError(e?.message ?? 'Failed to load milestone');
-        } finally {
-            setLoading(false);
-        }
-    };
+    const error = !scanId ? 'No scan ID provided' : queryError ? (queryError as Error).message : null;
 
     const updateStepProgress = async (stepId: string) => {
         if (!plan) return;
@@ -146,8 +75,13 @@ export default function MilestoneDetailPage() {
                 status: progress === 100 ? 'completed' : 'active',
             }).eq('id', plan.id);
 
-            // 4. Re-fetch to reflect updated state
-            await fetchPlan();
+            // 4. Invalidate caches so all screens reflect updated state
+            const { data: { user } } = await supabase.auth.getUser();
+            await queryClient.invalidateQueries({ queryKey: QUERY_KEYS.planDetail(scanId!) });
+            if (user) {
+                await queryClient.invalidateQueries({ queryKey: QUERY_KEYS.plans(user.id) });
+                await queryClient.invalidateQueries({ queryKey: QUERY_KEYS.homeData(user.id) });
+            }
         } catch (e: any) {
             console.error('[updateStep] error:', e?.message ?? e);
             Alert.alert(t.updateFailed, e?.message ?? 'Could not update step.');

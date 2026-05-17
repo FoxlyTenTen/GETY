@@ -131,6 +131,35 @@ const translations = {
         pleaseSignIn: 'Please sign in to save a report.',
         updateFailed: 'Update Failed',
 
+        // Scan page
+        scanPageTitle: 'Scan Leaf',
+        scanHeroTitle: 'Scan Your Leaf',
+        scanHeroSubtitle: 'Point your camera at an infected leaf or upload a photo for instant AI diagnosis.',
+        scanViewfinderHint: 'Tap below to start scanning',
+        snapPicture: 'Snap Picture',
+        uploadFromGallery: 'Upload from Gallery',
+        tipsForBestResults: 'Tips for Best Results',
+        tipGoodLightingTitle: 'Good Lighting',
+        tipGoodLightingDesc: 'Ensure the leaf is well-lit for clarity',
+        tipFillFrameTitle: 'Fill Frame',
+        tipFillFrameDesc: 'Get close enough to see vein details',
+        tipAvoidShadowsTitle: 'Avoid Shadows',
+        tipAvoidShadowsDesc: 'No harsh shadows obscuring the leaf',
+        tipSingleLeafTitle: 'Single Leaf',
+        tipSingleLeafDesc: 'Focus on one leaf at a time for accuracy',
+        permissionRequired: 'Permission Required',
+        galleryPermissionMsg: 'Please allow gallery access to upload a photo.',
+        cameraPermission: 'Camera Permission',
+        cameraPermissionMsg: 'Camera access is required to snap a photo.',
+        photoError: 'Failed to take photo. Please try again.',
+
+        // Offline mode (analysis screen)
+        loadingModel: 'Loading AI model...',
+        offlineBanner: 'You\'re offline. Connect to internet to get AI recommendations and save the report.',
+        offlineRagNote: 'AI recommendations unavailable offline. Basic info shown from local database.',
+        offlineConvertNote: 'Milestone plan generated from local data (offline mode).',
+        connectToSave: 'Internet connection required to save report.',
+
         // Treatment screen
         treatmentPlan: 'Treatment Plan',
         activeTreatment: 'ACTIVE TREATMENT',
@@ -305,6 +334,35 @@ const translations = {
         notSignedIn: 'Belum Log Masuk',
         pleaseSignIn: 'Sila log masuk untuk menyimpan laporan.',
         updateFailed: 'Kemas Kini Gagal',
+
+        // Scan page
+        scanPageTitle: 'Imbas Daun',
+        scanHeroTitle: 'Imbas Daun Anda',
+        scanHeroSubtitle: 'Arahkan kamera ke daun yang dijangkiti atau muat naik foto untuk diagnosis AI segera.',
+        scanViewfinderHint: 'Ketik di bawah untuk mula mengimbas',
+        snapPicture: 'Ambil Gambar',
+        uploadFromGallery: 'Muat Naik dari Galeri',
+        tipsForBestResults: 'Tips untuk Hasil Terbaik',
+        tipGoodLightingTitle: 'Pencahayaan Baik',
+        tipGoodLightingDesc: 'Pastikan daun diterangi dengan baik untuk kejelasan',
+        tipFillFrameTitle: 'Penuh Bingkai',
+        tipFillFrameDesc: 'Rapat cukup untuk melihat butiran urat daun',
+        tipAvoidShadowsTitle: 'Elakkan Bayang',
+        tipAvoidShadowsDesc: 'Tiada bayang yang menghalang daun',
+        tipSingleLeafTitle: 'Satu Daun',
+        tipSingleLeafDesc: 'Fokus pada satu daun pada satu masa untuk ketepatan',
+        permissionRequired: 'Kebenaran Diperlukan',
+        galleryPermissionMsg: 'Sila benarkan akses galeri untuk memuat naik foto.',
+        cameraPermission: 'Kebenaran Kamera',
+        cameraPermissionMsg: 'Akses kamera diperlukan untuk mengambil foto.',
+        photoError: 'Gagal mengambil foto. Sila cuba lagi.',
+
+        // Offline mode (analysis screen)
+        loadingModel: 'Memuatkan model AI...',
+        offlineBanner: 'Anda di luar talian. Sambung internet untuk mendapatkan cadangan AI dan simpan laporan.',
+        offlineRagNote: 'Cadangan AI tidak tersedia di luar talian. Maklumat asas ditunjukkan dari pangkalan data tempatan.',
+        offlineConvertNote: 'Pelan pencapaian dijana dari data tempatan (mod luar talian).',
+        connectToSave: 'Sambungan internet diperlukan untuk menyimpan laporan.',
 
         // Treatment screen
         treatmentPlan: 'Pelan Rawatan',
