@@ -28,6 +28,7 @@ export default function AdminLayout() {
     return (
         <Stack screenOptions={{ headerShown: false }}>
             <Stack.Screen name="knowledge-base-upload" />
+            <Stack.Screen name="dashboard" />
         </Stack>
     );
 }

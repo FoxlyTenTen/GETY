@@ -759,6 +759,76 @@ ALTER TABLE treatment_plans
 
 ---
 
+## Step 10 — Scan Image Storage (`leaf-images` bucket)
+
+Leaf images captured during a scan are uploaded here. The public URL is stored in `scans.image_url`.
+
+### 10a. Create Storage Bucket
+
+```sql
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES ('leaf-images', 'leaf-images', true, 5242880, ARRAY['image/jpeg', 'image/png', 'image/webp'])
+ON CONFLICT (id) DO NOTHING;
+```
+
+> `public: true` — images are served via a public URL so they display in the app without auth headers.
+
+### 10b. Storage RLS Policies
+
+```sql
+-- Any authenticated user can upload their own scan images
+CREATE POLICY "Authenticated upload scan images" ON storage.objects FOR INSERT
+    WITH CHECK (bucket_id = 'leaf-images' AND auth.role() = 'authenticated');
+
+-- Anyone can view scan images (bucket is public)
+CREATE POLICY "Public read scan images" ON storage.objects FOR SELECT
+    USING (bucket_id = 'leaf-images');
+
+-- Users can delete their own scan images
+CREATE POLICY "Owner delete scan images" ON storage.objects FOR DELETE
+    USING (bucket_id = 'leaf-images' AND auth.uid()::text = (storage.foldername(name))[1]);
+```
+
+> Image path format: `{userId}/{scanId}.jpg` — the folder name is the user's UUID, so the delete policy correctly limits each user to their own images.
+
+---
+
+## Step 11 — Admin Dashboard RLS Policies
+
+These allow the admin account to read all users' data for the analytics dashboard. Run **after** creating the `is_admin()` function below.
+
+### 11a. Create `is_admin()` Security Definer Function
+
+This function bypasses RLS when checking admin status, preventing infinite recursion.
+
+```sql
+CREATE OR REPLACE FUNCTION is_admin()
+RETURNS BOOLEAN AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.users
+    WHERE id = auth.uid() AND role = 'admin'
+  );
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+```
+
+### 11b. Admin Read Policies
+
+```sql
+-- Admins can read all trees (for dashboard stats)
+CREATE POLICY "admin_read_all_trees" ON trees
+  FOR SELECT USING (is_admin());
+
+-- Admins can read all scans (for dashboard stats)
+CREATE POLICY "admin_read_all_scans" ON scans
+  FOR SELECT USING (is_admin());
+```
+
+> **Do NOT** add a self-referential admin policy on `public.users` — it causes infinite recursion. The `is_admin()` SECURITY DEFINER function handles this safely.
+
+> The `knowledge_base_files` table already has "Admin full access" policy from Step 6 — no changes needed.
+
+---
+
 ## Table Relationships
 
 ```
@@ -768,4 +838,7 @@ auth.users  (Supabase built-in)
                     ├── Storage: knowledge-base bucket  (PDF/TXT files)
                     └── knowledge_base_chunks  (file_id → knowledge_base_files.id)
                             └── embedding vector(768)  [pgvector, used by RAG queries]
+
+Storage: leaf-images bucket  (public, path: {userId}/{scanId}.jpg)
+    └── URL stored in scans.image_url
 ```

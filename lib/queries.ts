@@ -8,6 +8,7 @@ export const QUERY_KEYS = {
     plans:          (uid: string)    => ['plans',          uid]    as const,
     planDetail:     (scanId: string) => ['planDetail',     scanId] as const,
     notifications:  (uid: string)    => ['notifications',  uid]    as const,
+    adminStats:     ()               => ['adminStats']             as const,
 };
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -308,6 +309,72 @@ export async function fetchPlanDetail(scanId: string): Promise<DetailDbPlan> {
 
     if (fetchErr) throw fetchErr;
     return data as unknown as DetailDbPlan;
+}
+
+// ─── Admin Stats ───────────────────────────────────────────────────────────────
+
+export type AdminStats = {
+    totalUsers: number;
+    totalScans: number;
+    avgConfidence: number;
+    kbDocuments: number;
+    userGrowth: { month: string; count: number }[];
+    diseaseDistribution: { name: string; count: number }[];
+    riskDistribution: { low: number; medium: number; high: number };
+    recentScans: { date: string; count: number }[];
+};
+
+export async function fetchAdminStats(): Promise<AdminStats> {
+    const [usersRes, scansRes, kbRes] = await Promise.all([
+        supabase.from('users').select('id, created_at'),
+        supabase.from('scans').select('disease_name, confidence_score, risk_level, scanned_at'),
+        supabase.from('knowledge_base_files').select('id', { count: 'exact', head: true }),
+    ]);
+
+    const users = (usersRes.data ?? []) as { id: string; created_at: string }[];
+    const scans = (scansRes.data ?? []) as { disease_name: string; confidence_score: number; risk_level: string; scanned_at: string }[];
+    const totalScans = scans.length;
+    const totalUsers = users.length;
+    const kbDocuments = kbRes.count ?? 0;
+
+    const avgConfidence = totalScans > 0
+        ? Math.round(scans.reduce((s, r) => s + (r.confidence_score ?? 0), 0) / totalScans)
+        : 0;
+
+    const now = new Date();
+    const userGrowth = Array.from({ length: 6 }, (_, i) => {
+        const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
+        const label = d.toLocaleDateString('en-MY', { month: 'short', year: '2-digit' });
+        const count = users.filter(u => {
+            const cd = new Date(u.created_at);
+            return cd.getFullYear() === d.getFullYear() && cd.getMonth() === d.getMonth();
+        }).length;
+        return { month: label, count };
+    });
+
+    const diseaseCounts: Record<string, number> = {};
+    scans.forEach(s => { diseaseCounts[s.disease_name] = (diseaseCounts[s.disease_name] ?? 0) + 1; });
+    const diseaseDistribution = Object.entries(diseaseCounts)
+        .sort((a, b) => b[1] - a[1]).slice(0, 6)
+        .map(([name, count]) => ({ name, count }));
+
+    const riskDistribution = {
+        low:    scans.filter(s => s.risk_level === 'low').length,
+        medium: scans.filter(s => s.risk_level === 'medium').length,
+        high:   scans.filter(s => s.risk_level === 'high').length,
+    };
+
+    const recentScans = Array.from({ length: 7 }, (_, i) => {
+        const d = new Date(); d.setDate(d.getDate() - (6 - i));
+        const label = d.toLocaleDateString('en-MY', { weekday: 'short' });
+        const count = scans.filter(s => {
+            const sd = new Date(s.scanned_at);
+            return sd.getFullYear() === d.getFullYear() && sd.getMonth() === d.getMonth() && sd.getDate() === d.getDate();
+        }).length;
+        return { date: label, count };
+    });
+
+    return { totalUsers, totalScans, avgConfidence, kbDocuments, userGrowth, diseaseDistribution, riskDistribution, recentScans };
 }
 
 // ─── Notifications ─────────────────────────────────────────────────────────────

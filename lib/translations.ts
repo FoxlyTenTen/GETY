@@ -3,7 +3,7 @@ export type Lang = 'en' | 'ms';
 const translations = {
     en: {
         // Sidebar
-        appName: 'LatexGuard',
+        appName: 'GETY',
         guest: 'Guest',
         menuHome: 'Home',
         menuScan: 'Scan Leaf',
@@ -16,7 +16,7 @@ const translations = {
         signOutConfirmTitle: 'Sign Out',
         signOutConfirmMsg: 'Are you sure you want to sign out?',
         cancel: 'Cancel',
-        footer: 'LatexGuard v1.0 · FYP 2025',
+        footer: 'GETY v1.0 · FYP 2025',
         language: 'Language',
 
         // Header Sign In button
@@ -194,7 +194,7 @@ const translations = {
         askMeAnything: 'Ask me anything',
         assistantIntro: 'I can help you understand your scan results, explain diseases, and guide you through the treatment plan.',
         suggestedQuestions: 'Suggested Questions',
-        suggested1: 'What is Pestalotiopsis?',
+        suggested1: 'What is Fusicoccum Leaf Blight?',
         suggested2: 'How to apply Mancozeb?',
         suggested3: 'Best time to spray fungicide',
         suggested4: 'Signs of leaf recovery',
@@ -204,7 +204,7 @@ const translations = {
     },
     ms: {
         // Sidebar
-        appName: 'LatexGuard',
+        appName: 'GETY',
         guest: 'Tetamu',
         menuHome: 'Utama',
         menuScan: 'Imbas Daun',
@@ -217,7 +217,7 @@ const translations = {
         signOutConfirmTitle: 'Log Keluar',
         signOutConfirmMsg: 'Adakah anda pasti mahu log keluar?',
         cancel: 'Batal',
-        footer: 'LatexGuard v1.0 · FYP 2025',
+        footer: 'GETY v1.0 · FYP 2025',
         language: 'Bahasa',
 
         // Header Sign In button
@@ -398,7 +398,7 @@ const translations = {
         askMeAnything: 'Tanya saya apa sahaja',
         assistantIntro: 'Saya boleh membantu anda memahami keputusan imbasan, menjelaskan penyakit, dan memandu anda melalui pelan rawatan.',
         suggestedQuestions: 'Soalan Dicadangkan',
-        suggested1: 'Apa itu Pestalotiopsis?',
+        suggested1: 'Apa itu Fusicoccum Leaf Blight?',
         suggested2: 'Cara menggunakan Mancozeb?',
         suggested3: 'Masa terbaik menyembur fungisid',
         suggested4: 'Tanda-tanda pemulihan daun',

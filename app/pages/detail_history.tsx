@@ -8,6 +8,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { supabase } from '@/lib/supabase';
+import MapPreview from '@/components/common/MapPreview';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -190,7 +191,7 @@ export default function DetailHistoryPage() {
                 </TouchableOpacity>
                 <View style={styles.logoContainer}>
                     <Ionicons name="leaf" size={20} color={COLORS.primary} />
-                    <Text style={styles.logoText}>LatexGuard</Text>
+                    <Text style={styles.logoText}>GETY</Text>
                 </View>
                 <View style={{ width: 36 }} />
             </View>
@@ -311,6 +312,11 @@ export default function DetailHistoryPage() {
                             <Ionicons name="location" size={16} color={COLORS.primary} />
                             <Text style={styles.gpsBlockTitle}>Tree GPS Location</Text>
                         </View>
+                        <MapPreview
+                            latitude={scan.tree.latitude}
+                            longitude={scan.tree.longitude}
+                            label={scan.tree.label_name ?? 'Tree Location'}
+                        />
                         <View style={styles.gpsCoordRow}>
                             <View style={styles.gpsCoordItem}>
                                 <Text style={styles.gpsCoordLabel}>LATITUDE</Text>

@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import {
     View, Text, StyleSheet, ScrollView,
-    TouchableOpacity, Image, Dimensions, ActivityIndicator,
+    TouchableOpacity, Dimensions, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -46,7 +46,7 @@ export default function Index() {
         enabled: !!userId,
     });
 
-    useFocusEffect(useCallback(() => {
+useFocusEffect(useCallback(() => {
         setAlertDismissed(false);
         refetch();
     }, [refetch]));
@@ -236,29 +236,6 @@ export default function Index() {
                     </TouchableOpacity>
                 </View>
 
-                {/* ── Admin: Knowledge Base ── */}
-                {isAdmin && (
-                    <TouchableOpacity
-                        style={styles.adminBtn}
-                        activeOpacity={0.88}
-                        onPress={() => router.push('/admin/knowledge-base-upload')}
-                    >
-                        <Ionicons name="cloud-upload-outline" size={20} color="#1e5b43" />
-                        <Text style={styles.adminBtnText}>{t.knowledgeBase}</Text>
-                        <Ionicons name="chevron-forward" size={18} color="#9ca3af" />
-                    </TouchableOpacity>
-                )}
-
-                {/* ── Decorative Leaf Image ── */}
-                <View style={styles.leafImageContainer}>
-                    <Image
-                        source={require('@/assets/images/leaf.jpeg')}
-                        style={styles.leafImage}
-                        resizeMode="cover"
-                    />
-                    <View style={styles.leafOverlay} />
-                </View>
-
                 <View style={{ height: 100 }} />
             </ScrollView>
         </SafeAreaView>
@@ -341,6 +318,11 @@ const styles = StyleSheet.create({
     },
     actionLabel: { fontSize: 13, fontWeight: '700', color: '#374151' },
 
+    adminStatsRow: {
+        flexDirection: 'row', alignItems: 'center',
+        backgroundColor: '#f0fdf4', borderRadius: 20, padding: 16,
+        marginBottom: 20, borderWidth: 1, borderColor: '#bbf7d0',
+    },
     adminBtn: {
         flexDirection: 'row', alignItems: 'center', gap: 10,
         backgroundColor: '#f0fdf4', borderRadius: 16, padding: 16,

@@ -67,7 +67,7 @@ export default function LoginPage() {
                         <View style={styles.logoCircle}>
                             <Ionicons name="leaf" size={36} color="#fff" />
                         </View>
-                        <Text style={styles.appName}>LatexGuard</Text>
+                        <Text style={styles.appName}>GETY</Text>
                         <Text style={styles.tagline}>
                             Securing the harvest of the{'\n'}rubber estates with intelligent insights.
                         </Text>

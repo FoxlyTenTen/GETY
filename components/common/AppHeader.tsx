@@ -15,6 +15,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
 import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
+import { supabase } from '@/lib/supabase';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const DRAWER_WIDTH = SCREEN_WIDTH * 0.72;
@@ -28,6 +29,13 @@ export default function AppHeader({ title }: AppHeaderProps) {
     const { language, setLanguage, t } = useLanguage();
     const isLoggedIn = !!session;
     const [drawerOpen, setDrawerOpen] = useState(false);
+    const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+
+    React.useEffect(() => {
+        if (!session?.user?.id) return;
+        supabase.from('users').select('avatar_url').eq('id', session.user.id).maybeSingle()
+            .then(({ data }) => setAvatarUrl(data?.avatar_url ?? null));
+    }, [session?.user?.id]);
     const slideAnim = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
     const fadeAnim = useRef(new Animated.Value(0)).current;
 
@@ -94,11 +102,14 @@ export default function AppHeader({ title }: AppHeaderProps) {
                 <Text style={styles.headerTitle}>{title}</Text>
 
                 {isLoggedIn ? (
-                    <TouchableOpacity style={styles.profileBtn} activeOpacity={0.8}>
-                        <Image
-                            source={require('../../assets/images/profile.avif')}
-                            style={styles.profileImage}
-                        />
+                    <TouchableOpacity style={styles.profileBtn} activeOpacity={0.8} onPress={() => router.push('/pages/profile' as any)}>
+                        {avatarUrl ? (
+                            <Image source={{ uri: avatarUrl }} style={styles.profileImage} />
+                        ) : (
+                            <View style={[styles.profileImage, styles.profilePlaceholder]}>
+                                <Ionicons name="person" size={20} color="#fff" />
+                            </View>
+                        )}
                     </TouchableOpacity>
                 ) : (
                     <TouchableOpacity
@@ -164,9 +175,14 @@ export default function AppHeader({ title }: AppHeaderProps) {
                             onPress={() => closeDrawer(() => router.push('/pages/notifications' as any))}
                         />
                         <DrawerItem
+                            icon="person-circle-outline"
+                            label="My Profile"
+                            onPress={() => closeDrawer(() => router.push('/pages/profile' as any))}
+                        />
+                        <DrawerItem
                             icon="settings-outline"
                             label={t.menuSettings}
-                            onPress={() => closeDrawer()}
+                            onPress={() => closeDrawer(() => router.push('/pages/profile' as any))}
                         />
                     </View>
 
@@ -281,6 +297,7 @@ const styles = StyleSheet.create({
         overflow: 'hidden', borderWidth: 2, borderColor: '#2eb86a',
     },
     profileImage: { width: '100%', height: '100%' },
+    profilePlaceholder: { backgroundColor: '#1e5b43', alignItems: 'center', justifyContent: 'center' },
 
     // Sign In pill (logged out)
     signInBtn: {

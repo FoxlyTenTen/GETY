@@ -13,6 +13,25 @@ import { supabase } from '@/lib/supabase';
 import { useLanguage } from '@/context/LanguageContext';
 import { QUERY_KEYS } from '@/lib/queries';
 
+// Upload leaf image to Supabase Storage and return the public URL
+async function uploadScanImage(localUri: string, userId: string): Promise<string | null> {
+    try {
+        const ext = localUri.split('.').pop()?.toLowerCase() ?? 'jpg';
+        const path = `${userId}/${Date.now()}.${ext}`;
+        const response = await fetch(localUri);
+        const blob = await response.blob();
+        const arrayBuffer = await new Response(blob).arrayBuffer();
+        const { error } = await supabase.storage
+            .from('leaf-images')
+            .upload(path, arrayBuffer, { contentType: `image/${ext === 'jpg' ? 'jpeg' : ext}`, upsert: false });
+        if (error) return null;
+        const { data } = supabase.storage.from('leaf-images').getPublicUrl(path);
+        return data.publicUrl;
+    } catch {
+        return null;
+    }
+}
+
 // Disease class labels returned by the /predict backend
 const CLASS_LABELS = ['Bird_Eye_Spot', 'Colletotrichum', 'Corynespora', 'Healthy', 'Leaf_Blight', 'Powdery_Mildew'];
 
@@ -393,6 +412,7 @@ export default function AnalysisPage() {
             // ── Step 4: Reuse existing scan or insert new one ─────────────
             let scanId = savedScanId;
             if (!scanId) {
+                const uploadedUrl = imageUri ? await uploadScanImage(imageUri, user.id) : null;
                 const recommendationJson = {
                     what_to_do_next: scanResult.whatToDo,
                     keep_your_farm_safe: scanResult.fungicideTips,
@@ -404,7 +424,7 @@ export default function AnalysisPage() {
                         tree_id: treeId,
                         disease_name: scanResult.diseaseName,
                         disease_description: scanResult.description,
-                        image_url: imageUri || null,
+                        image_url: uploadedUrl ?? imageUri ?? null,
                         recommendation_json: recommendationJson,
                         confidence_score: scanResult.confidence,
                         risk_level: scanResult.risk.toLowerCase() as 'low' | 'medium' | 'high',
@@ -432,7 +452,7 @@ export default function AnalysisPage() {
                     tree_id: treeId,
                     title: `${scanResult.diseaseName} Treatment`,
                     disease_name: scanResult.diseaseName,
-                    estimated_recovery_days: scanResult.dayPlan,
+                    estimated_recovery_days: Math.max(1, Math.round(scanResult.dayPlan)),
                     overall_progress: 0,
                     status: 'active',
                     expert_tip: expertTipText,
@@ -522,6 +542,7 @@ export default function AnalysisPage() {
 
             // Only insert scan if not already saved
             if (!savedScanId) {
+                const uploadedUrl = imageUri ? await uploadScanImage(imageUri, user.id) : null;
                 const recommendationJson = {
                     what_to_do_next: scanResult.whatToDo,
                     keep_your_farm_safe: scanResult.fungicideTips,
@@ -533,7 +554,7 @@ export default function AnalysisPage() {
                         tree_id: treeId,
                         disease_name: scanResult.diseaseName,
                         disease_description: scanResult.description,
-                        image_url: imageUri || null,
+                        image_url: uploadedUrl ?? imageUri ?? null,
                         recommendation_json: recommendationJson,
                         confidence_score: scanResult.confidence,
                         risk_level: scanResult.risk.toLowerCase() as 'low' | 'medium' | 'high',
@@ -661,7 +682,7 @@ export default function AnalysisPage() {
             <View style={styles.header}>
                 <View style={styles.logoContainer}>
                     <Ionicons name="leaf" size={20} color={COLORS.primary} />
-                    <Text style={styles.logoText}>LatexGuard</Text>
+                    <Text style={styles.logoText}>GETY</Text>
                 </View>
                 <TouchableOpacity style={styles.bellButton}>
                     <Ionicons name="notifications" size={20} color={COLORS.textMain} />

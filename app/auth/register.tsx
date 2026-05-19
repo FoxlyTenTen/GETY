@@ -95,7 +95,7 @@ export default function RegisterPage() {
                         <View style={styles.logoCircle}>
                             <Ionicons name="leaf" size={36} color="#fff" />
                         </View>
-                        <Text style={styles.appName}>LatexGuard</Text>
+                        <Text style={styles.appName}>GETY</Text>
                         <Text style={styles.tagline}>
                             Create your estate account{'\n'}and start monitoring today.
                         </Text>

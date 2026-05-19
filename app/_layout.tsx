@@ -60,6 +60,7 @@ export default function RootLayout() {
                         <Stack screenOptions={{ headerShown: false }}>
                             <Stack.Screen name="(tabs)" />
                             <Stack.Screen name="pages/notifications" />
+                            <Stack.Screen name="pages/profile" />
                             <Stack.Screen name="auth/login" options={{ presentation: 'modal' }} />
                             <Stack.Screen name="auth/register" options={{ presentation: 'modal' }} />
                         </Stack>
